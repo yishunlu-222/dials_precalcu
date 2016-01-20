@@ -13,6 +13,7 @@ tst_list = (
     "$D/test/algorithms/background/tst_outlier_rejector.py",
     "$D/test/algorithms/generate_test_reflections/tst_generate_test_refl.py",
     "$D/test/algorithms/image/connected_components/tst_connected_components.py",
+    "$D/test/algorithms/image/filter/tst_distance.py",
     "$D/test/algorithms/image/filter/tst_fano.py",
     "$D/test/algorithms/image/filter/tst_mean_and_variance.py",
     "$D/test/algorithms/image/filter/tst_median.py",
