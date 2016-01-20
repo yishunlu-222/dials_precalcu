@@ -135,7 +135,7 @@ namespace dials { namespace algorithms { namespace background {
           double n = count_[i];
           double mean = s1 / n;
           double var = (s2 - s1*s1 / n) / (n - 1);
-          if (var / mean < 1.0 + nsigma * sqrt(2.0 / (n - 1))) {
+          if (var <= mean * (1.0 + nsigma * sqrt(2.0 / (n - 1)))) {
             data[i] = mean;
             mask[i] = true;
           }
