@@ -24,6 +24,14 @@ namespace dials { namespace algorithms { namespace boost_python {
         arg("niter")=1,
         arg("kappa")=50,
         arg("gamma")=0.1));
+
+    def("anisotropic_diffusion",
+      &masked_anisotropic_diffusion, (
+        arg("data"),
+        arg("mask"),
+        arg("niter")=1,
+        arg("kappa")=50,
+        arg("gamma")=0.1));
   }
 
 }}} // namespace = dials::algorithms::boost_python
