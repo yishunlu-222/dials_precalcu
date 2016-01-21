@@ -21,6 +21,7 @@ namespace dials { namespace algorithms { namespace boost_python {
   void export_convolve();
   void export_median();
   void export_distance();
+  void export_anisotropic_diffusion();
 
   BOOST_PYTHON_MODULE(dials_algorithms_image_filter_ext)
   {
@@ -30,6 +31,7 @@ namespace dials { namespace algorithms { namespace boost_python {
     export_convolve();
     export_median();
     export_distance();
+    export_anisotropic_diffusion();
   }
 
 }}} // namespace = dials::algorithms::boost_python
