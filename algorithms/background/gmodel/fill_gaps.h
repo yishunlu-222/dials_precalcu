@@ -21,6 +21,7 @@
 #include <dials/array_family/scitbx_shared_and_versa.h>
 #include <dials/algorithms/polygon/spatial_interpolation.h>
 #include <dials/algorithms/image/filter/summed_area.h>
+#include <dials/model/data/shoebox.h>
 #include <dials/error.h>
 
 namespace dials { namespace algorithms { namespace background {
@@ -31,6 +32,8 @@ namespace dials { namespace algorithms { namespace background {
   using scitbx::vec2;
   using scitbx::vec3;
   using scitbx::af::int2;
+  using scitbx::af::int6;
+  using dials::model::Shoebox;
   using dials::algorithms::polygon::simple_area;
   using dials::algorithms::polygon::clip::vert4;
   using dials::algorithms::polygon::clip::vert8;
@@ -49,7 +52,6 @@ namespace dials { namespace algorithms { namespace background {
     T max4(T a, T b, T c, T d) {
       return std::max(std::max(a,b), std::max(c,d));
     }
-
   }
 
   inline
@@ -87,6 +89,8 @@ namespace dials { namespace algorithms { namespace background {
       std::size_t niter) {
     DIALS_ASSERT(size.all_ge(0));
 
+    int total_size = (2*size[0]+1)*(2*size[1]+1);
+
     af::versa< int, af::c_grid<2> > int_mask(data.accessor());
     for (std::size_t i = 0; i < int_mask.size(); ++i) {
       int_mask[i] = (int)mask[i];
@@ -105,7 +109,7 @@ namespace dials { namespace algorithms { namespace background {
       // Calculate the mean filtered image
       for (std::size_t i = 0; i < data.size(); ++i) {
         if (!mask[i]) {
-          result[i] = summed_data[i] /= (double)summed_mask[i];
+          result[i] = summed_data[i] / (double)total_size;///= (double)summed_mask[i];
         }
       }
     }
@@ -192,6 +196,8 @@ namespace dials { namespace algorithms { namespace background {
           }
         }
       }
+      min_r_step_ *= 2;
+      min_a_step_ *= 2;
       num_r_ = (max_r_ - min_r_) / min_r_step_;
       num_a_ = (max_a_ - min_a_) / min_a_step_;
 
@@ -251,6 +257,9 @@ namespace dials { namespace algorithms { namespace background {
             int x1 = x0 + 1;
             int y0 = std::floor(y);
             int y1 = y0 + 1;
+            if (!mask(y0,x0) || !mask(y0,x1) || !mask(y1,x1) || !mask(y1,x1)) {
+              continue;
+            }
             double px = x - x0;
             double py = y - y0;
             double f00 = data(y0,x0);
@@ -390,6 +399,112 @@ namespace dials { namespace algorithms { namespace background {
         const af::const_ref< bool, af::c_grid<2> > &mask,
         double sigma,
         int kernel_size,
+        std::size_t niter,
+        bool all) const {
+
+      // Compute an image of sigmas for the gaussian kernel which varies with
+      // resolution.
+      af::versa< double, af::c_grid<2> > sigma_image(data.accessor());
+      for (std::size_t j = 0; j < data.accessor()[0]; ++j) {
+        for (std::size_t i = 0; i < data.accessor()[1]; ++i) {
+          double d0 = resolution_(j,i);
+          double dsum = 0.0;
+          double dcnt = 0.0;
+          if (j > 0) {
+            dsum += std::abs(resolution_(j-1,i) - d0);
+            dcnt++;
+          }
+          if (i > 0) {
+            dsum += std::abs(resolution_(j,i-1) - d0);
+            dcnt++;
+          }
+          if (j < data.accessor()[0]-1) {
+            dsum += std::abs(resolution_(j+1,i) - d0);
+            dcnt++;
+          }
+          if (i < data.accessor()[1]-1) {
+            dsum += std::abs(resolution_(j,i+1) - d0);
+            dcnt++;
+          }
+          sigma_image(j,i) = sigma * dsum / dcnt;
+        }
+      }
+
+      // Iteratively filter the image
+      for (std::size_t iter = 0; iter < niter; ++iter) {
+        std::cout << iter << std::endl;
+        fill_image(data, mask, sigma_image.const_ref(), kernel_size, all);
+      }
+    }
+
+  private:
+
+    void fill_image(
+        af::ref< double, af::c_grid<2> > data,
+        const af::const_ref< bool, af::c_grid<2> > &mask,
+        const af::const_ref< double, af::c_grid<2> > &sigma_image,
+        int kernel_size,
+        bool all) const {
+      int height = (int)data.accessor()[0];
+      int width = (int)data.accessor()[1];
+      for (std::size_t j = 0; j < data.accessor()[0]; ++j) {
+        for (std::size_t i = 0; i < data.accessor()[1]; ++i) {
+          if (all || mask(j,i) == false) {
+            int jc = (int)j;
+            int ic = (int)i;
+            int j0 = std::max(jc - kernel_size, 0);
+            int j1 = std::min(jc + kernel_size, height);
+            int i0 = std::max(ic - kernel_size, 0);
+            int i1 = std::min(ic + kernel_size, width);
+            double d0 = resolution_(j,i);
+            double kernel_data = 0.0;
+            double kernel_sum = 0.0;
+            double sigma = sigma_image(j,i);
+            for (int jj = j0; jj < j1; ++jj) {
+              for (int ii = i0; ii < i1; ++ii) {
+                if (jj != j && ii != i) {
+                  double d = resolution_(jj,ii);
+                  double kernel_value = std::exp(-(d-d0)*(d-d0)/(2.0*sigma*sigma));
+                  kernel_data += data(jj,ii) * kernel_value;
+                  kernel_sum += kernel_value;
+                }
+              }
+            }
+            DIALS_ASSERT(kernel_sum > 0);
+            data(j,i) = kernel_data / kernel_sum;
+          }
+        }
+      }
+    }
+
+    af::versa< double, af::c_grid<2> > resolution_;
+  };
+
+  class FillGaps2 {
+  public:
+
+    FillGaps2(
+        const Beam &beam,
+        const Panel &panel)
+      : resolution_(
+          af::c_grid<2>(
+            panel.get_image_size()[1],
+            panel.get_image_size()[0])) {
+      vec3<double> s0 = beam.get_s0();
+      for (std::size_t j = 0; j < resolution_.accessor()[0]; ++j) {
+        for (std::size_t i = 0; i < resolution_.accessor()[1]; ++i) {
+          vec2<double> px(i+0.5, j+0.5);
+          resolution_(j,i) = panel.get_resolution_at_pixel(s0, px);
+        }
+      }
+    }
+
+
+    void operator()(
+        af::ref< double, af::c_grid<2> > data,
+        const af::const_ref< int, af::c_grid<2> > &mask,
+        double sigma,
+        int kernel_size,
         std::size_t niter) const {
 
       // Compute an image of sigmas for the gaussian kernel which varies with
@@ -431,14 +546,15 @@ namespace dials { namespace algorithms { namespace background {
 
     void fill_image(
         af::ref< double, af::c_grid<2> > data,
-        const af::const_ref< bool, af::c_grid<2> > &mask,
+        const af::const_ref< int, af::c_grid<2> > &mask,
         const af::const_ref< double, af::c_grid<2> > &sigma_image,
         int kernel_size) const {
+
       int height = (int)data.accessor()[0];
       int width = (int)data.accessor()[1];
       for (std::size_t j = 0; j < data.accessor()[0]; ++j) {
         for (std::size_t i = 0; i < data.accessor()[1]; ++i) {
-          if (mask(j,i) == false) {
+          if (mask(j,i) == 0) {
             int jc = (int)j;
             int ic = (int)i;
             int j0 = std::max(jc - kernel_size, 0);
@@ -452,10 +568,12 @@ namespace dials { namespace algorithms { namespace background {
             for (int jj = j0; jj < j1; ++jj) {
               for (int ii = i0; ii < i1; ++ii) {
                 if (jj != j && ii != i) {
-                  double d = resolution_(jj,ii);
-                  double kernel_value = std::exp(-(d-d0)*(d-d0)/(2.0*sigma*sigma));
-                  kernel_data += data(jj,ii) * kernel_value;
-                  kernel_sum += kernel_value;
+                  if (mask(jj,ii) >= 0) {
+                    double d = resolution_(jj,ii);
+                    double kernel_value = std::exp(-(d-d0)*(d-d0)/(2.0*sigma*sigma));
+                    kernel_data += data(jj,ii) * kernel_value;
+                    kernel_sum += kernel_value;
+                  }
                 }
               }
             }
@@ -467,6 +585,97 @@ namespace dials { namespace algorithms { namespace background {
     }
 
     af::versa< double, af::c_grid<2> > resolution_;
+  };
+
+
+  /**
+   * A class to fit the background model
+   */
+  class Fitter {
+  public:
+
+    /**
+     * Initialise the creator
+     */
+    Fitter(const af::const_ref< double, af::c_grid<2> > background)
+      : background_(background.accessor()) {
+      std::copy(background.begin(), background.end(), background_.begin());
+    }
+
+    /**
+     * Compute the background values
+     * @param sbox The shoeboxes
+     * @returns Success True/False
+     */
+    af::shared<bool> compute_background(af::ref< Shoebox<> > sbox) const {
+      af::shared<bool> success(sbox.size(), true);
+      for (std::size_t i = 0; i < sbox.size(); ++i) {
+        try {
+          compute(sbox[i]);
+        } catch(scitbx::error) {
+          success[i] = false;
+        } catch(dials::error) {
+          success[i] = false;
+        }
+      }
+      return success;
+    }
+
+  private:
+
+    /**
+     * Compute the background values for a single shoebox
+     * @param sbox The shoebox
+     */
+    void compute(Shoebox<> &sbox) const {
+      DIALS_ASSERT(sbox.is_consistent());
+
+      // Get image dimensions
+      std::size_t height = background_.accessor()[0];
+      std::size_t width = background_.accessor()[1];
+
+      // Get shoebox dimensions
+      std::size_t xs = sbox.xsize();
+      std::size_t ys = sbox.ysize();
+      std::size_t zs = sbox.zsize();
+      int6 bbox = sbox.bbox;
+
+      // Get the shoebox model
+      af::versa< double, af::c_grid<2> > model(af::c_grid<2>(ys, xs));
+      double sum_m = 0.0;
+      for (std::size_t j = 0; j < ys; ++j) {
+        for (std::size_t i = 0; i < xs; ++i) {
+          int jj = bbox[2] + j;
+          int ii = bbox[0] + i;
+          if (jj >= 0 && ii >= 0 && jj < height && ii < width) {
+            model(j,i) = background_(jj,ii);
+            sum_m += model(j,i);
+          }
+        }
+      }
+      DIALS_ASSERT(sum_m > 0);
+
+      // Compute the background scale
+      double sum_b = 0.0;
+      for (std::size_t i = 0; i < sbox.data.size(); ++i) {
+        if (sbox.mask[i]) {
+          sum_b += sbox.data[i];
+        }
+      }
+      double scale = sum_b / (zs*sum_m);
+
+      // Apply the background
+      for (std::size_t j = 0; j < ys; ++j) {
+        for (std::size_t i = 0; i < xs; ++i) {
+          double value = model(j,i) * scale;
+          for (std::size_t k = 0; k < zs; ++k) {
+            sbox.background(k,j,i) = value;
+          }
+        }
+      }
+    }
+
+    af::versa< double, af::c_grid<2> > background_;
   };
 
 }}}

@@ -50,14 +50,19 @@ namespace dials { namespace algorithms { namespace background {
       .def("xy2", &PolarTransform::xy2)
       ;
 
-    class_<FillGaps>("FillGaps", no_init)
+    class_<FillGaps2>("FillGaps", no_init)
       .def(init<const Beam&, const Panel&>())
-      .def("__call__", &FillGaps::operator())
+      .def("__call__", &FillGaps2::operator())
       ;
 
     def("row_median", &row_median);
 
     def("fill_gaps", &fill_gaps);
+
+    class_<Fitter>("Fitter", no_init)
+      .def(init<const af::const_ref<double, af::c_grid<2> >&>())
+      .def("__call__", &Fitter::compute_background)
+      ;
   }
 
 }}}} // namespace = dials::algorithms::background::boost_python
