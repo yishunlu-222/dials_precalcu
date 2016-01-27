@@ -35,10 +35,29 @@ namespace dials { namespace algorithms { namespace background {
       .def("num_images", &PixelFilter::num_images)
       ;
 
+    class_<PolarTransformResult>("PolarTransformResult", no_init)
+      .def("data", &PolarTransformResult::data)
+      .def("mask", &PolarTransformResult::mask)
+      ;
+
+    class_<PolarTransform>("PolarTransform", no_init)
+      .def(init<const Beam&, const Panel&>())
+      .def("r", &PolarTransform::r)
+      .def("a", &PolarTransform::a)
+      .def("to_polar", &PolarTransform::to_polar)
+      .def("to_cartesian", &PolarTransform::to_cartesian)
+      .def("xy", &PolarTransform::xy)
+      .def("xy2", &PolarTransform::xy2)
+      ;
+
     class_<FillGaps>("FillGaps", no_init)
       .def(init<const Beam&, const Panel&>())
       .def("__call__", &FillGaps::operator())
       ;
+
+    def("row_median", &row_median);
+
+    def("fill_gaps", &fill_gaps);
   }
 
 }}}} // namespace = dials::algorithms::background::boost_python
