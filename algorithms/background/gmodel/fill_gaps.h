@@ -607,18 +607,18 @@ namespace dials { namespace algorithms { namespace background {
      * @param sbox The shoeboxes
      * @returns Success True/False
      */
-    af::shared<bool> compute_background(af::ref< Shoebox<> > sbox) const {
-      af::shared<bool> success(sbox.size(), true);
+    af::shared<double> compute_background(af::ref< Shoebox<> > sbox) const {
+      af::shared<double> scale(sbox.size(), -1.0);
       for (std::size_t i = 0; i < sbox.size(); ++i) {
         try {
-          compute(sbox[i]);
+          scale[i] = compute(sbox[i]);
         } catch(scitbx::error) {
-          success[i] = false;
+          // Do nothing
         } catch(dials::error) {
-          success[i] = false;
+          // Do nothing
         }
       }
-      return success;
+      return scale;
     }
 
   private:
@@ -627,7 +627,7 @@ namespace dials { namespace algorithms { namespace background {
      * Compute the background values for a single shoebox
      * @param sbox The shoebox
      */
-    void compute(Shoebox<> &sbox) const {
+    double compute(Shoebox<> &sbox) const {
       DIALS_ASSERT(sbox.is_consistent());
 
       // Get image dimensions
@@ -673,6 +673,9 @@ namespace dials { namespace algorithms { namespace background {
           }
         }
       }
+
+      // Return the background scale
+      return scale;
     }
 
     af::versa< double, af::c_grid<2> > background_;
