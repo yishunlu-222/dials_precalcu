@@ -642,27 +642,33 @@ namespace dials { namespace algorithms { namespace background {
 
       // Get the shoebox model
       af::versa< double, af::c_grid<2> > model(af::c_grid<2>(ys, xs));
-      double sum_m = 0.0;
       for (std::size_t j = 0; j < ys; ++j) {
         for (std::size_t i = 0; i < xs; ++i) {
           int jj = bbox[2] + j;
           int ii = bbox[0] + i;
           if (jj >= 0 && ii >= 0 && jj < height && ii < width) {
             model(j,i) = background_(jj,ii);
-            sum_m += model(j,i);
+          }
+        }
+      }
+
+      // Compute the background scale
+      int mask_code = Background | Valid;
+      double sum_m = 0.0;
+      double sum_b = 0.0;
+      for (std::size_t k = 0; k < zs; ++k) {
+        for (std::size_t j = 0; j < ys; ++j) {
+          for (std::size_t i = 0; i < xs; ++i) {
+            if ((sbox.mask(k,j,i) & mask_code) == mask_code) {
+              sum_b += sbox.data(k,j,i);
+              sum_m += model(j,i);
+              sbox.mask(k,j,i) |= BackgroundUsed;
+            }
           }
         }
       }
       DIALS_ASSERT(sum_m > 0);
-
-      // Compute the background scale
-      double sum_b = 0.0;
-      for (std::size_t i = 0; i < sbox.data.size(); ++i) {
-        if (sbox.mask[i]) {
-          sum_b += sbox.data[i];
-        }
-      }
-      double scale = sum_b / (zs*sum_m);
+      double scale = sum_b / sum_m;
 
       // Apply the background
       for (std::size_t j = 0; j < ys; ++j) {
