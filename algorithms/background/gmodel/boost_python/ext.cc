@@ -63,6 +63,17 @@ namespace dials { namespace algorithms { namespace background {
       .def(init<const af::const_ref<double, af::c_grid<2> >&>())
       .def("__call__", &Fitter::compute_background)
       ;
+
+    class_<DispersionThreshold>("DispersionThreshold", no_init)
+      .def(init< std::size_t,
+                 std::size_t,
+                 double,
+                 double,
+                 double,
+                 int >())
+      .def("__call__", &DispersionThreshold::threshold<int>)
+      .def("__call__", &DispersionThreshold::threshold<double>)
+      ;
   }
 
 }}}} // namespace = dials::algorithms::background::boost_python

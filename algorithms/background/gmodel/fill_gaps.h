@@ -686,6 +686,185 @@ namespace dials { namespace algorithms { namespace background {
 
     af::versa< double, af::c_grid<2> > background_;
   };
+  
+  /**
+   * A class to compute the threshold using index of dispersion
+   */
+  class DispersionThreshold {
+  public:
+
+    /**
+     * Enable more efficient memory usage by putting components required for the
+     * summed area table closer together in memory
+     */
+    template <typename T>
+    struct Data {
+      int m;
+      T   x;
+      T   y;
+    };
+
+    DispersionThreshold(
+              std::size_t data_size,
+              std::size_t kernel_size,
+              double nsig_b,
+              double nsig_s,
+              double threshold,
+              int min_count)
+        : data_size_(data_size),
+          kernel_size_(kernel_size),
+          nsig_b_(nsig_b),
+          nsig_s_(nsig_s),
+          threshold_(threshold),
+          min_count_(min_count) {
+
+      // Check the input
+      DIALS_ASSERT(threshold_ >= 0);
+      DIALS_ASSERT(nsig_b >= 0 && nsig_s >= 0);
+      DIALS_ASSERT(data_size > 0);
+      DIALS_ASSERT(kernel_size > 0);
+
+      // Ensure the min counts are valid
+      std::size_t num_kernel = (2*kernel_size+1);
+      if (min_count_ <= 0) {
+        min_count_ = num_kernel;
+      } else {
+        DIALS_ASSERT(min_count_ <= num_kernel && min_count_ > 1);
+      }
+
+      // Allocate the buffer
+      std::size_t element_size = sizeof(Data<double>);
+      buffer_.resize(element_size * data_size);
+    }
+
+    /**
+     * Compute the summed area tables for the mask, src and src^2.
+     * @param src The input array
+     * @param mask The mask array
+     */
+    template <typename T>
+    void compute_sat(
+        af::ref< Data<T> > table,
+        const af::const_ref< T > &src,
+        const af::const_ref< bool > &mask) {
+
+      // Get the size of the image
+      std::size_t size = src.size();
+
+      // Create the summed area table
+      int m = 0;
+      T   x = 0;
+      T   y = 0;
+      for (std::size_t i = 0; i < size; ++i) {
+        int mm = mask[i] ? 1 : 0;
+        m += mm;
+        x += mm * src[i];
+        y += mm * src[i] * src[i];
+        table[i].m = m;
+        table[i].x = x;
+        table[i].y = y;
+      }
+    }
+
+    /**
+     * Compute the threshold
+     * @param src - The input array
+     * @param mask - The mask array
+     * @param dst The output array
+     */
+    template <typename T>
+    void compute_threshold(
+        af::ref< Data<T> > table,
+        const af::const_ref< T > &src,
+        const af::const_ref< bool > &mask,
+        af::ref< bool > dst) {
+
+      // Get the size of the image
+      std::size_t size = src.size();
+
+      // The kernel size
+      int ksize = kernel_size_;
+
+      // Calculate the local mean at every point
+      for (std::size_t i = 0 ; i < size; ++i) {
+        int i0 = i - ksize - 1, i1 = i + ksize;
+        i1 = i1 < size ? i1 : size - 1;
+
+        // Compute the number of points valid in the local area,
+        // the sum of the pixel values and the sum of the squared pixel
+        // values.
+        double m = 0;
+        double x = 0;
+        double y = 0;
+        if (i0 >= 0) {
+          const Data<T>& d0 = table[i0];
+          m = d0.m;
+          x = d0.x;
+          y = d0.y;
+        }
+        const Data<T>& d1 = table[i1];
+        m = d1.m - m;
+        x = d1.x - x;
+        y = d1.y - y;
+
+        // Compute the thresholds
+        dst[i] = false;
+        if (mask[i] && m >= min_count_ && x >= 0 && src[i] > threshold_) {
+          double a = m * y - x * x - x * (m-1);
+          double b = m * src[i] - x;
+          double c = x * nsig_b_ * std::sqrt(2*(m-1));
+          double d = nsig_s_ * std::sqrt(x * m);
+          dst[i] = a > c && b > d;
+        }
+      }
+    }
+
+
+    /**
+     * Compute the threshold for the given image and mask.
+     * @param src - The input image array.
+     * @param mask - The mask array.
+     * @param dst - The destination array.
+     */
+    template <typename T>
+    af::shared<bool> threshold(
+        const af::const_ref< T > &src,
+        const af::const_ref< bool > &mask) {
+
+      af::shared< bool > dst(src.size());
+
+      // check the input
+      DIALS_ASSERT(src.size() == data_size_);
+      DIALS_ASSERT(src.size() == mask.size());
+
+      // Get the table
+      DIALS_ASSERT(sizeof(T) <= sizeof(double));
+
+      // Cast the buffer to the table type
+      af::ref< Data<T> > table(
+          reinterpret_cast<Data<T>*>(&buffer_[0]),
+          buffer_.size());
+
+      // compute the summed area table
+      compute_sat(table, src, mask);
+
+      // Compute the image threshold
+      compute_threshold(table, src, mask, dst.ref());
+
+      return dst;
+    }
+
+
+  private:
+
+    std::size_t data_size_;
+    std::size_t kernel_size_;
+    double nsig_b_;
+    double nsig_s_;
+    double threshold_;
+    int min_count_;
+    std::vector<char> buffer_;
+  };
 
 }}}
 
