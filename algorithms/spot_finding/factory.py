@@ -484,6 +484,10 @@ class SpotFinderFactory(object):
     if params.spotfinder.mp.method == 'none':
       params.spotfinder.mp.method = None
 
+    # FIXME for dials-171 propogate down params.output.shoeboxes so we can
+    # make use of it in deciding how to execute the spot search for grid
+    # scan data
+
     # Setup the spot finder
     return SpotFinder(
       threshold_function        = threshold_function,

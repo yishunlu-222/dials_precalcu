@@ -470,6 +470,12 @@ class SpotFinder(object):
     if self.mask is not None:
       mask = tuple(m1 & m2 for m1, m2 in zip(mask, self.mask))
 
+    # FIXME for dials-171 in here extend or adapt to include capability to
+    # perform full spot finding process i.e. derive centroids etc. if
+    # not isinstance(imageset, ImageSweep) && params.output.shoeboxes is False
+    # suggest best way to do that would be to add new method (say)
+    # _find_in_imagegrid
+
     # Set the spot finding algorithm
     extract_spots = ExtractSpots(
       threshold_function        = self.threshold_function,
