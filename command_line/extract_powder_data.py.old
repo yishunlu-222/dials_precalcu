@@ -1,0 +1,197 @@
+# LIBTBX_SET_DISPATCHER_NAME dials.background
+
+from __future__ import division
+
+import iotbx.phil
+import json
+import numpy as np
+
+help_message = '''
+
+Examples::
+
+  dials.extract_powder_data datablock.json
+
+  dials.extract_powder_data image_*.cbf
+
+'''
+
+phil_scope = iotbx.phil.parse("""\
+bins = 100
+  .type = int
+frames = None
+  .type = int
+  .multiple = True
+""", process_includes=True)
+
+def main():
+  import sys
+  run(sys.argv[1:])
+
+def run(args):
+  with open('powder.json', 'r') as fh:
+    powder = json.load(fh)
+  print powder
+
+  means = []
+  variances = []
+  for p in xrange(5, len(powder) - 5):
+    window = powder[(p-5):(p+6)]
+    window = zip(*window)[1]
+    mean = np.mean(window)
+    var = np.var(window)
+    means.append(mean)
+    variances.append(var)
+    print powder[p][1], mean + (var ** 0.5)
+    if powder[p][1] > (mean + 2*(var ** 0.5)):
+      print "**", powder[p][0], (powder[p][1] - mean) / (var**0.5)
+ 
+# for j in powder
+
+  powder = powder[5:-5]
+  with open("powder.dat", 'w') as fh:
+    for j in zip(powder, means, variances):
+      fh.write('%f %f %f %f\n' % (j[0][0], j[0][1], j[1], j[2]))
+
+  import sys
+  sys.exit(1)
+
+  from dials.util.options import OptionParser
+  from dials.util.options import flatten_datablocks
+  import libtbx.load_env
+
+  usage = "%s [options] image_*.cbf" % (
+    libtbx.env.dispatcher_name)
+
+  parser = OptionParser(
+    usage=usage,
+    phil=phil_scope,
+    read_datablocks=True,
+    read_datablocks_from_images=True,
+    epilog=help_message)
+
+  params, options = parser.parse_args(show_diff_phil=True)
+  datablocks = flatten_datablocks(params.input.datablock)
+
+  if len(datablocks) == 0 and len(experiments) == 0 and len(reflections) == 0:
+    parser.print_help()
+    exit()
+
+  assert(len(datablocks) == 1)
+
+  datablock = datablocks[0]
+  imagesets = datablock.extract_imagesets()
+
+  assert(len(imagesets) == 1)
+
+  imageset = imagesets[0]
+  extract_powder_data(imageset, params)
+
+def extract_powder_data(imageset, params):
+  images = imageset.indices()
+  if params.frames:
+    images = params.frames
+
+  detector = imageset.get_detector()
+  beam = imageset.get_beam()
+  assert(len(detector) == 1)
+  detector = detector[0]
+  trusted = detector.get_trusted_range()
+
+  from dials.array_family import flex
+  from libtbx.phil import parse
+  from scitbx import matrix
+  import math
+
+  n = matrix.col(detector.get_normal()).normalize()
+  b = matrix.col(beam.get_s0()).normalize()
+  wavelength = beam.get_wavelength()
+
+  if math.fabs(b.dot(n)) < 0.95:
+    from libtbx.utils import Sorry
+    print 'Detector not perpendicular to beam'
+
+  joint_data = None
+  bad = None
+
+  for indx in images:
+    print 'Reading frame %d' % indx
+    data = imageset.get_raw_data(indx)
+    assert(len(data) == 1)
+    data = data[0]
+    negative = (data < 0)
+    hot = (data > int(round(trusted[1])))
+    if bad is None:
+      bad = negative | hot
+    else:
+      bad = bad | negative | hot
+    if joint_data is None:
+      joint_data = data
+    else:
+      joint_data = joint_data + data
+  data = joint_data
+  data.set_selected(bad, 0)
+
+#  from dials.algorithms.spot_finding.factory import SpotFinderFactory
+#  from dials.algorithms.spot_finding.factory import phil_scope
+  two_theta_array = detector.get_two_theta_array(beam.get_s0())
+#  two_theta_array.set_selected(bad.iselection(), 0.0)
+#  print two_theta_array
+#  print list(two_theta_array)
+
+  data = data.as_double()
+  data = data.as_1d()
+#  print data
+#  print list(data)
+
+#  spot_params = phil_scope.fetch(source=parse("")).extract()
+#  threshold_function = SpotFinderFactory.configure_threshold(spot_params)
+#  peak_pixels = threshold_function.compute_threshold(data, ~bad)
+#  signal = data.select(peak_pixels.iselection())
+#  background = data.select((~bad & ~peak_pixels).iselection())
+#
+#  # print some summary information
+#  print 'Mean background: %.3f' % (flex.sum(background) / background.size())
+#  print 'Max/total signal pixels: %.0f / %.0f' % (flex.max(signal),
+#                                                 flex.sum(signal))
+#  print 'Peak/background/hot pixels: %d / %d / %d' % (peak_pixels.count(True),
+#                                                      background.size(),
+#                                                      hot.count(True))
+
+  # compute histogram of two-theta values, then same weighted
+  # by pixel values, finally divide latter by former to get
+  # the radial profile out, need to set the number of bins
+  # sensibly; flex.histogram does not allow weights so use
+  # numpy.histogram to get the same effect... inspired by
+  # method in PyFAI
+
+  # new fangled flex.weighted_histogram :-)
+  n_bins = params.bins
+  h0 = flex.weighted_histogram(two_theta_array, n_slots=n_bins)
+  h1 = flex.weighted_histogram(two_theta_array, data, n_slots=n_bins)
+  h2 = flex.weighted_histogram(two_theta_array, data * data, n_slots=n_bins)
+
+  d0 = h0.slots()
+  d1 = h1.slots()
+  d2 = h2.slots()
+
+  I = d1 / d0
+  I2 = d2 / d0
+
+  tt_range = 0, flex.max(two_theta_array)
+
+  print '%8s %8s %8s %8s' % ('2theta', 'd', 'I', 'sig')
+  powder = []
+  with open("powder.dat", 'w') as fh:
+    for j in range(0, len(I)):
+      tt = tt_range[0] + (j + 0.5) * (1.0 / n_bins) * (tt_range[1] - tt_range[0])
+      d = wavelength / (2.0 * math.sin(0.5 * tt))
+      print '%8.3f %8.3f %8.3f %8.3f' % (180 * tt / 3.14159, d, I[j], math.sqrt(I2[j] - I[j]**2))
+      fh.write('%f %f\n' % (180 * tt / 3.14159, I[j]))
+      powder.append((180 * tt / 3.14159, I[j]))
+  with open('powder.json', 'w') as fh:
+    json.dump(powder, fh, indent=2)
+
+
+if __name__ == '__main__':
+  main()
