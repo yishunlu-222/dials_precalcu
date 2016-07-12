@@ -395,7 +395,7 @@ class SpotFrame(XrayFrame) :
       spacings = flex.sorted(unit_cell.d(indices))
 
     else:
-      n_rings = 5
+      n_rings = 10
       step = d_star_sq_max/n_rings
       spacings = flex.double(
         [uctbx.d_star_sq_as_d((i+1)*step) for i in range(0, n_rings)])
@@ -430,6 +430,13 @@ class SpotFrame(XrayFrame) :
     # FIXME Currently assuming that all panels are in same plane
     pan = detector[0]
     for tt, d, pxl in zip(twotheta, spacings, L_pixels):
+      print "\nResolution ring for two theta = %.1f" % (tt * 180 / 3.14159)
+
+      # Determine eccentricity, cf. https://en.wikipedia.org/wiki/Eccentricity_(mathematics)
+      ecc = math.sin(matrix.col(pan.get_normal()).angle(beamvec)) \
+            / math.sin(math.pi/2 - tt)
+      print "Resolution ring eccentricity: %.4f" % ecc
+
       try:
         # Find 4 rays for given d spacing / two theta angle
         cb1 = beamvec.rotate_around_origin(axis=bor1, angle=tt)
@@ -495,11 +502,6 @@ class SpotFrame(XrayFrame) :
       print dp3
       print dp4
       print "ellipse centre:", centre
-
-      # Determine eccentricity, cf. https://en.wikipedia.org/wiki/Eccentricity_(mathematics)
-      ecc = math.sin(matrix.col(pan.get_normal()).angle(beamvec)) \
-            / math.sin(math.pi/2 - tt)
-      print "ellipse eccentricity:", ecc
 
       # Assuming that one detector axis is aligned with a major axis of
       # the ellipse, obtain the semimajor axis length a to calculate the
