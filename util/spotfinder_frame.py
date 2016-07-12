@@ -399,6 +399,8 @@ class SpotFrame(XrayFrame) :
       step = d_star_sq_max/n_rings
       spacings = flex.double(
         [uctbx.d_star_sq_as_d((i+1)*step) for i in range(0, n_rings)])
+#   spacings = spacings * 2
+
     resolution_text_data = []
     if self.settings.color_scheme > 1 : # heatmap or invert
       textcolour = 'white'
@@ -413,8 +415,10 @@ class SpotFrame(XrayFrame) :
       uctbx.d_as_d_star_sq(spacings), wavelength)
     L_mm = []
     L_pixels = []
+#    print list(twotheta * 180 / 3.14159)
     for tt in twotheta: L_mm.append(distance * math.tan(tt))
     for lmm in L_mm: L_pixels.append(lmm/pixel_size)
+#    print beam
 
     # Get beam vector and two orthogonal vectors
     beamvec = matrix.col(beam.get_s0())
@@ -443,6 +447,12 @@ class SpotFrame(XrayFrame) :
         # Otherwise it's a hyperbola (not implemented yet)
       except RuntimeError:
         continue
+
+      print "\nDetector coordinates:"
+      print dp1
+      print dp2
+      print dp3
+      print dp4
 
       # find ellipse centre, the only point equidistant to each axial pair
       xs1 = dp1[0] + dp2[0]
@@ -479,9 +489,17 @@ class SpotFrame(XrayFrame) :
       dp3 = self.pyslip.tiles.picture_fast_slow_to_map_relative(dp3[0], dp3[1])
       dp4 = self.pyslip.tiles.picture_fast_slow_to_map_relative(dp4[0], dp4[1])
 
+      print "Detector coordinates in map space:"
+      print dp1
+      print dp2
+      print dp3
+      print dp4
+      print "ellipse centre:", centre
+
       # Determine eccentricity, cf. https://en.wikipedia.org/wiki/Eccentricity_(mathematics)
       ecc = math.sin(matrix.col(pan.get_normal()).angle(beamvec)) \
             / math.sin(math.pi/2 - tt)
+      print "ellipse eccentricity:", ecc
 
       # Assuming that one detector axis is aligned with a major axis of
       # the ellipse, obtain the semimajor axis length a to calculate the
@@ -495,11 +513,15 @@ class SpotFrame(XrayFrame) :
         major = dp3
         a = ldp3
       b = math.sqrt(a * a * (1 - (ecc * ecc)))
+      print "semimajor axis length:", a
+      print "semiminor axis length:", b
       # since e = f / a and f = sqrt(a^2 - b^2), cf. https://en.wikipedia.org/wiki/Ellipse
 
       # calculate co-vertex
       minor = matrix.col([-centre[1] - dp1[1], centre[0] - dp1[0]]).normalize() * b
       minor = (minor[0] + centre[0], minor[1] + centre[1])
+      print "vertex:", major
+      print "co-vertex:", minor
 
       p = (centre, major, minor)
       ring_data.append((p, self.pyslip.DefaultPolygonPlacement,
