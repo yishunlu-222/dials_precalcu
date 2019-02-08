@@ -10,7 +10,7 @@ from dials.algorithms.scaling.Ih_table import IhTable
 from dials.algorithms.scaling.reflection_selection import \
   select_highly_connected_reflections,\
   select_connected_reflections_across_datasets,\
-  select_highly_connected_reflections_in_bin
+  select_highly_connected_reflections_in_bin, _loop_over_class_matrix
 
 def test_select_highly_connected_reflections_in_bin():
   """Test the single-bin selection algorithm."""
@@ -96,7 +96,7 @@ def test_reflection_selection(dials_regression):
 
   indices = select_highly_connected_reflections(reflection_table, experiment,
     min_per_area=10, n_resolution_bins=10)
-  assert len(indices) > 1650 and len(indices) < 1800
+  assert len(indices) > 1710 and len(indices) < 1800
   ##FIXME ^^ different answer on linux/windows? 1658 vs 1712?
 
   # Give a high min_per_area to check that all reflections with multiplciity > 1
