@@ -71,7 +71,8 @@ from dials.util.exclude_images import exclude_image_ranges_for_scaling, \
 from dials.algorithms.scaling.algorithm import targeted_scaling_algorithm, \
   scaling_algorithm
 from dials.algorithms.scaling.reflection_selection import determine_reflection_selection_parameters
-
+from dials.util.observer import Subject
+from dials.algorithms.scaling.observers import register_default_scaling_observers
 
 logger = logging.getLogger('dials')
 info_handle = log.info_handle(logger)
@@ -101,6 +102,9 @@ phil_scope = phil.parse('''
       .type = str
       .help = "Option to set filepath for output pickle file of scaled
                intensities."
+    html = "scaling.html"
+      .type = str
+      .help = "Filename for html report."
     unmerged_mtz = None
       .type = path
       .help = "Filename to export an unmerged_mtz, calls dials.export internally."
@@ -134,16 +138,19 @@ phil_scope = phil.parse('''
   include scope dials.util.multi_dataset_handling.phil_scope
 ''', process_includes=True)
 
-class Script(object):
+class Script(Subject):
   """Main script to run the scaling algorithm."""
 
   def __init__(self, params, experiments, reflections):
+    super(Script, self).__init__(events=['merging_statistics', 'run_script'])
     self.scaler = None
     self.scaled_miller_array = None
     self.merging_statistics_result = None
     self.params, self.experiments, self.reflections = self.prepare_input(
       params, experiments, reflections)
     self._create_model_and_scaler()
+    logger.debug('Initialised scaling script object')
+    log_memory_usage()
 
   def _create_model_and_scaler(self):
     """Create the scaling models and scaler."""
@@ -159,19 +166,18 @@ class Script(object):
     self.experiments = set_image_ranges_in_scaling_models(self.experiments)
 
     self.scaler = create_scaler(self.params, self.experiments, self.reflections)
-    logger.debug('Initialised scaling script object')
-    log_memory_usage()
 
+  @Subject.notify_event(event='run_script')
   def run(self, save_data=True):
     """Run the scaling script."""
     start_time = time.time()
     self.scale()
     self.remove_unwanted_datasets()
     print_scaling_model_error_info(self.experiments)
-    self.prepare_scaled_miller_array()
+    self.scaled_miller_array = self.scaled_data_as_miller_array(self.reflections,
+      self.experiments, anomalous_flag=False)
     try:
-      self.merging_statistics_result = self.merging_stats(
-        self.scaled_miller_array, self.params)
+      self.calculate_merging_stats()
     except DialsMergingStatisticsError as e:
       logger.info(e)
 
@@ -218,10 +224,10 @@ class Script(object):
 
     elif params.scaling_options.target_mtz:
       logger.info("Extracting data from merged mtz.")
-      exp, reflections = create_datastructures_for_target_mtz(experiments,
+      exp, reflection_table = create_datastructures_for_target_mtz(experiments,
         params.scaling_options.target_mtz)
       experiments.append(exp)
-      reflections.append(reflections)
+      reflections.append(reflection_table)
 
     #### Perform any non-batch cutting of the datasets, including the target dataset
     best_unit_cell = Script.determine_best_unit_cell(experiments)
@@ -326,11 +332,6 @@ will not be used for calculating merging statistics""" % pos_scales.count(False)
       miller.array_info(source='DIALS', source_type='reflection_tables'))
     return i_obs
 
-  def prepare_scaled_miller_array(self):
-    """Calculate a scaled miller array from the dataset."""
-    self.scaled_miller_array = self.scaled_data_as_miller_array(self.reflections,
-      self.experiments, anomalous_flag=False)
-
   @staticmethod
   def stats_only(reflections, experiments, params):
     """Calculate and print merging stats."""
@@ -340,12 +341,17 @@ will not be used for calculating merging statistics""" % pos_scales.count(False)
     scaled_miller_array = Script.scaled_data_as_miller_array(reflections,
       experiments, best_unit_cell=best_unit_cell)
     try:
-      _ = Script.merging_stats(scaled_miller_array, params)
+      _ = Script.merging_stats_from_scaled_array(scaled_miller_array, params)
     except DialsMergingStatisticsError as e:
       logger.info(e)
 
+  @Subject.notify_event(event='merging_statistics')
+  def calculate_merging_stats(self):
+    self.merging_statistics_result = self.merging_stats_from_scaled_array(
+      self.scaled_miller_array, self.params)
+
   @staticmethod
-  def merging_stats(scaled_miller_array, params):
+  def merging_stats_from_scaled_array(scaled_miller_array, params):
     """Calculate and print the merging statistics."""
     logger.info("%s %s %s", '\n', '='*80, '\n')
 
@@ -361,12 +367,13 @@ will not be used for calculating merging statistics""" % pos_scales.count(False)
         i_obs=scaled_miller_array, n_bins=params.output.merging.nbins,
         anomalous=False, sigma_filtering=None, eliminate_sys_absent=False,
         use_internal_variance=params.output.use_internal_variance)
+    except RuntimeError:
+      raise DialsMergingStatisticsError("Failure during merging statistics calculation")
+    else:
       show_merging_summary(result.overall)
       show_merging_stats_by_resolution(result)
       show_estimated_cutoffs(result)
-      return result
-    except RuntimeError:
-      raise DialsMergingStatisticsError("Failure during merging statistics calculation")
+    return result
 
   def delete_datastructures(self):
     """Delete the data in the scaling datastructures to save RAM before
@@ -637,6 +644,9 @@ if __name__ == "__main__":
         logger.info(diff_phil)
 
       script = Script(params, experiments, reflections)
+      # Register the observers at the highest level
+      if params.output.html:
+        register_default_scaling_observers(script)
       script.run()
 
   except Exception as e:

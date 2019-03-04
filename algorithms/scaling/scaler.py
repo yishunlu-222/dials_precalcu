@@ -42,11 +42,12 @@ from dials.algorithms.scaling.combine_intensities import \
 from dials.algorithms.scaling.reflection_selection import \
   calculate_scaling_subset_connected, calculate_scaling_subset,\
   select_highly_connected_reflections, select_connected_reflections_across_datasets
+from dials.util.observer import Subject
 
 logger = logging.getLogger('dials')
 
 
-class ScalerBase(object):
+class ScalerBase(Subject):
   """
   Abstract base class for all scalers (single and multiple).
   """
@@ -55,6 +56,10 @@ class ScalerBase(object):
 
   def __init__(self):
     """Define the properties of a scaler."""
+    super(ScalerBase, self).__init__(events=[
+      'performed_scaling',
+      'performed_error_analysis',
+      'performed_outlier_rejection'])
     self._experiment = None
     self._space_group = None
     self._params = None
@@ -157,6 +162,7 @@ class ScalerBase(object):
   def expand_scales_to_all_reflections(self, caller=None, calc_cov=False):
     """Expand scales from a subset to all reflections."""
 
+  @Subject.notify_event(event='performed_scaling')
   def perform_scaling(self, target_type=ScalingTarget, engine=None,
       max_iterations=None):
     """Minimise the scaling model."""
@@ -180,6 +186,7 @@ class ScalerBase(object):
       refinery.return_scaler()
       logger.info(('\n' + '='*80 +'\n'))
 
+  @Subject.notify_event(event='performed_error_analysis')
   def perform_error_optimisation(self, update_Ih=True, apply_to_reflection_table=False):
     """Perform an optimisation of the sigma values."""
     Ih_table = self.global_Ih_table
@@ -509,6 +516,7 @@ class SingleScaler(ScalerBase):
     logger.info('The following corrections will be applied to this dataset: \n')
     logger.info(st.format())
 
+  @Subject.notify_event(event='performed_outlier_rejection')
   def round_of_outlier_rejection(self):
     """Perform a round of outlier rejection, set a new outliers array."""
     assert self.global_Ih_table is not None
@@ -725,6 +733,7 @@ class MultiScalerBase(ScalerBase):
     self._create_Ih_table()
     self._update_model_data()
 
+  @Subject.notify_event(event='performed_outlier_rejection')
   def round_of_outlier_rejection(self, target=None):
     """
     Perform a round of outlier rejection across all datasets.
