@@ -209,7 +209,7 @@ def test_SingleScaler_initialisation():
 
   # check for correct data/d_values in components
   d_suitable = r['d'].select(scaler.suitable_refl_for_scaling_sel)
-  decay = scaler.experiments.scaling_model.components['decay']
+  decay = scaler.experiment.scaling_model.components['decay']
   # first check 'data' contains all suitable reflections
   assert list(decay.data['d']) == list(d_suitable)
   # Now check 'd_values' (which will be used for minim.) matches Ih_table data
@@ -272,7 +272,7 @@ def test_multiscaler_initialisation():
   # check for correct data/d_values in components
   for i, scaler in enumerate(multiscaler.active_scalers):
     d_suitable = scaler.reflection_table['d'].select(scaler.suitable_refl_for_scaling_sel)
-    decay = scaler.experiments.scaling_model.components['decay']
+    decay = scaler.experiment.scaling_model.components['decay']
     # first check 'data' contains all suitable reflections
     assert list(decay.data['d']) == list(d_suitable)
     # Now check 'd_values' (which will be used for minim.) matches Ih_table data
@@ -330,14 +330,14 @@ def test_targetscaler_initialisation():
   # check for correct data/d_values in components
   for i, scaler in enumerate(targetscaler.active_scalers):
     d_suitable = scaler.reflection_table['d'].select(scaler.suitable_refl_for_scaling_sel)
-    decay = scaler.experiments.scaling_model.components['decay']
+    decay = scaler.experiment.scaling_model.components['decay']
     # first check 'data' contains all suitable reflections
     assert list(decay.data['d']) == list(d_suitable)
     # Now check 'd_values' (which will be used for minim.) matches Ih_table data
     assert list(decay.d_values[0]) == list(d_suitable.select(block_selections[i]))
 
   #but shouldn't have updated other
-  assert targetscaler.single_scalers[0].experiments.scaling_model.components['decay'].d_values == []
+  assert targetscaler.single_scalers[0].experiment.scaling_model.components['decay'].d_values == []
 
 def generated_refl_for_splitting_1():
   """Create a reflection table suitable for splitting into blocks."""
@@ -386,7 +386,7 @@ def test_SingleScaler_expand_scales_to_all_reflections(mock_apm):
   # to calculate scales for unsuitable reflections!)
   # Must also update the scales in the global_Ih_table
   assert list(scaler.reflection_table['inverse_scale_factor']) == [1.0] * 8
-  scaler.experiments.scaling_model.components['scale'].parameters = flex.double([2.0])
+  scaler.experiment.scaling_model.components['scale'].parameters = flex.double([2.0])
   scaler.expand_scales_to_all_reflections(calc_cov=False)
   assert list(scaler.reflection_table['inverse_scale_factor']) == [2.0] * 5 + [1.0] + [2.0] * 2
   assert list(scaler.global_Ih_table.blocked_data_list[0].inverse_scale_factors) == [2.0] * 7
@@ -494,7 +494,7 @@ def test_update_error_model(mock_errormodel, mock_errormodel2):
   newvars = flex.double(range(1, 8))
   assert list(block.block_selections[0]) == [2, 0, 4, 5, 6, 1, 3]
   assert list(block.weights) == list(1.0/newvars)
-  assert scaler.experiments.scaling_model.error_model is mock_errormodel
+  assert scaler.experiment.scaling_model.error_model is mock_errormodel
 
   # now test for updating of reflection table
   # do again with second errormodel
@@ -507,7 +507,7 @@ def test_update_error_model(mock_errormodel, mock_errormodel2):
   # the one non-suitable refl at index 5)
   assert list(scaler.reflection_table['variance']) == list(newvars)
   assert list(block.weights) == list(1.0/newvars)[:-1]
-  assert scaler.experiments.scaling_model.error_model is mock_errormodel2
+  assert scaler.experiment.scaling_model.error_model is mock_errormodel2
 
 def test_SingleScaler_combine_intensities():
   """test combine intensities method"""

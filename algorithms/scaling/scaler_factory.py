@@ -165,7 +165,7 @@ class MultiScalerFactory(object):
       #scaler.select_reflections_for_scaling(for_multi=True)
       single_scalers.append(scaler)
     single_scalers.extend(targetscaler.single_scalers)
-    return MultiScaler(targetscaler.params, [targetscaler.experiments], single_scalers)
+    return MultiScaler(targetscaler.params, [targetscaler.experiment], single_scalers)
 
 class TargetScalerFactory(object):
   'Factory for creating a targeted scaler for multiple datasets'

@@ -55,7 +55,7 @@ class ScalerBase(object):
 
   def __init__(self):
     """Define the properties of a scaler."""
-    self._experiments = None
+    self._experiment = None
     self._space_group = None
     self._params = None
     self._reflection_table = []
@@ -97,9 +97,9 @@ class ScalerBase(object):
     return self._global_Ih_table
 
   @property
-  def experiments(self):
+  def experiment(self):
     """The experiment object associated with the dataset."""
-    return self._experiments
+    return self._experiment
 
   @property
   def space_group(self):
@@ -121,8 +121,8 @@ class ScalerBase(object):
     else:
       raise AssertionError('''Space group not recognised as a space group symbol
         or cctbx.sgtbx.space group object.''')
-    if self.experiments:
-      self.experiments.crystal.set_space_group(self._space_group)
+    if self.experiment:
+      self.experiment.crystal.set_space_group(self._space_group)
     if current_sg != self._space_group:
       logger.info(('WARNING: Manually overriding space group from {0} to {1}. {sep}'
       'If the reflection indexing in these space groups is different, {sep}'
@@ -223,11 +223,11 @@ class SingleScaler(ScalerBase):
     assert all(reflection_table.has_key(i) for i in ['inverse_scale_factor',
       'intensity', 'variance', 'id'])
     super(SingleScaler, self).__init__()
-    self._experiments = experiment
+    self._experiment = experiment
     self._params = params
     self.active_scalers = [self]
     self.verbosity = params.scaling_options.verbosity
-    self._space_group = self.experiments.crystal.get_space_group()
+    self._space_group = self.experiment.crystal.get_space_group()
     if self._params.scaling_options.space_group:
       self.space_group = self._params.scaling_options.space_group
     n_model_params = sum([val.n_params for val in self.components.itervalues()])
@@ -238,7 +238,7 @@ class SingleScaler(ScalerBase):
     self.suitable_refl_for_scaling_sel = self.get_suitable_for_scaling_sel(
       self._reflection_table)
     self.n_suitable_refl = self.suitable_refl_for_scaling_sel.count(True)
-    if self._experiments.scaling_model.is_scaled:
+    if self._experiment.scaling_model.is_scaled:
       outliers = self._reflection_table.get_flags(self._reflection_table.flags.outlier_in_scaling)
       self.outliers = outliers.select(self.suitable_refl_for_scaling_sel)
     else:
@@ -246,9 +246,9 @@ class SingleScaler(ScalerBase):
     self.scaling_subset_sel = None # A selection of len n_suitable_refl of scaling subset selection
     self.scaling_selection = None # As above, but with outliers deselected also
     self._configure_model_and_datastructures()
-    if 'Imid' in self.experiments.scaling_model.configdict:
-      self.combine_intensities(self.experiments.scaling_model.configdict['Imid'])
-    if not self._experiments.scaling_model.is_scaled:
+    if 'Imid' in self.experiment.scaling_model.configdict:
+      self.combine_intensities(self.experiment.scaling_model.configdict['Imid'])
+    if not self._experiment.scaling_model.is_scaled:
       self.round_of_outlier_rejection()
     if not for_multi:
       self._select_reflections_for_scaling()
@@ -274,12 +274,12 @@ class SingleScaler(ScalerBase):
   @property
   def components(self):
     """Shortcut to the scaling model components."""
-    return self.experiments.scaling_model.components
+    return self.experiment.scaling_model.components
 
   @property
   def consecutive_refinement_order(self):
     """Link to consecutive refinement order for parameter manager."""
-    return self.experiments.scaling_model.consecutive_refinement_order
+    return self.experiment.scaling_model.consecutive_refinement_order
 
   @property
   def var_cov_matrix(self):
@@ -350,7 +350,7 @@ class SingleScaler(ScalerBase):
       # now set in global_Ih_table
       self.global_Ih_table.update_data_in_blocks(intensity, 0, column='intensity')
       self.global_Ih_table.update_data_in_blocks(variance, 0, column='variance')
-      self.experiments.scaling_model.record_intensity_combination_Imid(combiner.max_key)
+      self.experiment.scaling_model.record_intensity_combination_Imid(combiner.max_key)
 
   def expand_scales_to_all_reflections(self, caller=None, calc_cov=False):
     """
@@ -419,11 +419,11 @@ class SingleScaler(ScalerBase):
       new_vars = error_model.update_variances(
         self._reflection_table['variance'], self._reflection_table['intensity'])
       self._reflection_table['variance'] = new_vars
-    self.experiments.scaling_model.set_error_model(error_model)
+    self.experiment.scaling_model.set_error_model(error_model)
 
   def adjust_variances(self):
     """Apply an aimless-like error model to the variances."""
-    error_model = self.experiments.scaling_model.error_model
+    error_model = self.experiment.scaling_model.error_model
     if error_model and self.params.weighting.output_optimised_vars:
       # Note : this action has overwritten the variances, so no further
       # error model adjustment should take place, without reinitialising from
@@ -454,7 +454,7 @@ class SingleScaler(ScalerBase):
       min_per_area = self.params.reflection_selection.quasi_random.min_per_area[0]
       n_resolution_bins = self.params.reflection_selection.quasi_random.n_resolution_bins[0]
       overall_scaling_selection = calculate_scaling_subset_connected(
-        self.reflection_table, self.experiments, min_per_area, n_resolution_bins)
+        self.reflection_table, self.experiment, min_per_area, n_resolution_bins)
       self.scaling_selection = overall_scaling_selection.select(
         self.suitable_refl_for_scaling_sel)
     elif self.params.reflection_selection.method == 'intensity_ranges':
@@ -498,8 +498,8 @@ class SingleScaler(ScalerBase):
     stored data.
     """
     sel_reflections = self._reflection_table.select(self.suitable_refl_for_scaling_sel)
-    self.experiments.scaling_model.configure_components(
-      sel_reflections, self.experiments, self.params)
+    self.experiment.scaling_model.configure_components(
+      sel_reflections, self.experiment, self.params)
     self._global_Ih_table = IhTable([sel_reflections], self.space_group,
       nblocks=1)
     rows = []
@@ -566,7 +566,7 @@ class MultiScalerBase(ScalerBase):
     """Initialise from a list of single scalers."""
     super(MultiScalerBase, self).__init__()
     self.single_scalers = single_scalers
-    self._experiments = experiments[0]
+    self._experiment = experiments[0]
     self._space_group = single_scalers[0].space_group
     self.active_scalers = None
     self._initial_keys = self.single_scalers[0].initial_keys
@@ -584,10 +584,10 @@ class MultiScalerBase(ScalerBase):
     """
     initial_number = len(scalers)
     for n in n_list[::-1]:
-      self._removed_datasets.append(scalers[n].experiments.identifier)
+      self._removed_datasets.append(scalers[n].experiment.identifier)
       del scalers[n]
     if 0 in n_list:
-      self._experiments = scalers[0].experiments
+      self._experiment = scalers[0].experiment
     assert len(scalers) == initial_number - len(n_list)
     logger.info("Removed datasets: %s", n_list)
 
@@ -615,7 +615,7 @@ class MultiScalerBase(ScalerBase):
     for scaler in self.active_scalers:
       scaler.adjust_variances()
     if self.verbosity <= 1:
-      if (self.single_scalers[0].experiments.scaling_model.error_model and
+      if (self.single_scalers[0].experiment.scaling_model.error_model and
         self.params.weighting.output_optimised_vars):
         logger.info(('The error model has been used to adjust the variances for all \n'
          'applicable datasets. \n'))
@@ -667,7 +667,7 @@ class MultiScalerBase(ScalerBase):
           scaler.reflection_table['intensity'])
         scaler.reflection_table['variance'] = new_vars
     for scaler in self.active_scalers:
-      scaler.experiments.scaling_model.set_error_model(error_model)
+      scaler.experiment.scaling_model.set_error_model(error_model)
 
   def _update_model_data(self):
     for i, scaler in enumerate(self.active_scalers):
@@ -762,9 +762,9 @@ class MultiScalerBase(ScalerBase):
         # now find good ones from resolution method.
         indiv_indices = select_highly_connected_reflections(
           scaler.reflection_table.select(scaler.suitable_refl_for_scaling_sel),
-          scaler.experiments, qr.min_per_area[i], qr.n_resolution_bins[i])
+          scaler.experiment, qr.min_per_area[i], qr.n_resolution_bins[i])
         scaler.scaling_selection.set_selected(indiv_indices, True)
-        rows.append([scaler.experiments.identifier, str(indices_for_dataset.size()),
+        rows.append([scaler.experiment.identifier, str(indices_for_dataset.size()),
           str(indiv_indices.size()), str(scaler.scaling_selection.count(True))])
         scaler.scaling_subset_sel = copy.deepcopy(scaler.scaling_selection)
         scaler.scaling_selection &= ~scaler.outliers
@@ -833,7 +833,7 @@ class MultiScaler(MultiScalerBase):
             scaler.suitable_refl_for_scaling_sel.iselection(), variance)
           self.global_Ih_table.update_data_in_blocks(intensity, i, column='intensity')
           self.global_Ih_table.update_data_in_blocks(variance, i, column='variance')
-          scaler.experiments.scaling_model.record_intensity_combination_Imid(combiner.max_key)
+          scaler.experiment.scaling_model.record_intensity_combination_Imid(combiner.max_key)
     else:
       for scaler in self.single_scalers:
         scaler.combine_intensities()
@@ -904,10 +904,10 @@ class NullScaler(ScalerBase):
   def __init__(self, params, experiment, reflection):
     """Set the required properties to use as a scaler for targeted scaling."""
     super(NullScaler, self).__init__()
-    self._experiments = experiment
+    self._experiment = experiment
     self._params = params
     self.verbosity = params.scaling_options.verbosity
-    self._space_group = self.experiments.crystal.get_space_group()
+    self._space_group = self.experiment.crystal.get_space_group()
     if self._params.scaling_options.space_group:
       self._space_group = self._params.scaling_options.space_group
     self._reflection_table = reflection
@@ -928,7 +928,7 @@ class NullScaler(ScalerBase):
   @property
   def components(self):
     """Shortcut to scaling model components."""
-    return self.experiments.scaling_model.components
+    return self.experiment.scaling_model.components
 
   def expand_scales_to_all_reflections(self, caller=None, calc_cov=False):
     """Fill in abstract method, do nothing."""

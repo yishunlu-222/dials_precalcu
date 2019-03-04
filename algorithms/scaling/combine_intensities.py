@@ -67,7 +67,7 @@ class SingleDatasetIntensityCombiner(object):
         'No profile intensities found, skipping profile/summation intensity combination.')
       return
     self.scaler = scaler
-    self.experiment = scaler.experiments
+    self.experiment = scaler.experiment
     if use_Imid is not None:
       self.max_key = use_Imid
     else:
@@ -179,7 +179,7 @@ class MultiDatasetIntensityCombiner(object):
 
   def __init__(self, multiscaler):
     self.active_scalers = multiscaler.active_scalers
-    self.experiment = multiscaler.experiments
+    self.experiment = multiscaler.active_scalers[0].experiment
     self.Imids = multiscaler.params.reflection_selection.combine.Imid
     #first copy across relevant data that's needed
     self.good_datasets = []
