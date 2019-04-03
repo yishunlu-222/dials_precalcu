@@ -539,7 +539,7 @@ class SingleScaler(ScalerBase):
                 0
             ]
             overall_scaling_selection = calculate_scaling_subset_connected(
-                self.reflection_table, self.experiment, min_per_area, n_resolution_bins
+                self.reflection_table, self.experiment, min_per_area, n_resolution_bins, global_Ih_table=self.global_Ih_table
             )
             self.scaling_selection = overall_scaling_selection.select(
                 self.suitable_refl_for_scaling_sel
