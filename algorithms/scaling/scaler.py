@@ -27,7 +27,7 @@ from dials.array_family import flex
 from dials.algorithms.scaling.basis_functions import basis_function
 from dials.algorithms.scaling.outlier_rejection import determine_outlier_index_arrays
 from dials.algorithms.scaling.Ih_table import IhTable
-from dials.algorithms.scaling.target_function import ScalingTarget, ScalingTargetFixedIH
+from dials.algorithms.scaling.target_function import ScalingTarget, ScalingTargetFixedIH, ScalingVarianceTarget
 from dials.algorithms.scaling.scaling_refiner import (
     scaling_refinery,
     error_model_refinery,
@@ -179,7 +179,7 @@ class ScalerBase(Subject):
 
     @Subject.notify_event(event="performed_scaling")
     def perform_scaling(
-        self, target_type=ScalingTarget, engine=None, max_iterations=None
+        self, target_type=ScalingVarianceTarget, engine=None, max_iterations=None
     ):
         """Minimise the scaling model."""
         apm_factory = create_apm_factory(self)

@@ -79,8 +79,6 @@ class ScalingTarget(object):
     @staticmethod
     def calculate_gradients(Ih_table):
         """Return a gradient vector on length len(self.apm.x)."""
-        gsq = Ih_table.inverse_scale_factors ** 2 * Ih_table.weights
-        sumgsq = gsq * Ih_table.h_index_matrix
         prefactor = (
             -2.0
             * Ih_table.weights
@@ -89,17 +87,11 @@ class ScalingTarget(object):
                 - (Ih_table.Ih_values * Ih_table.inverse_scale_factors)
             )
         )
-        dIh = (
-            Ih_table.intensities
-            - (Ih_table.Ih_values * 2.0 * Ih_table.inverse_scale_factors)
-        ) * Ih_table.weights
-        dIh_by_dpi = calc_dIh_by_dpi(
-            dIh, sumgsq, Ih_table.h_index_matrix, Ih_table.derivatives.transpose()
-        )
+        dIhbydpi = dIh_by_dpi(Ih_table)
         term_1 = (prefactor * Ih_table.Ih_values) * Ih_table.derivatives
         term_2 = (
             prefactor * Ih_table.inverse_scale_factors * Ih_table.h_index_matrix
-        ) * dIh_by_dpi
+        ) * dIhbydpi
         gradient = term_1 + term_2
         return gradient
 
@@ -182,6 +174,78 @@ class ScalingTarget(object):
             return restr
         return None
 
+class ScalingVarianceTarget(object):
+
+    _grad_names = ["dI_dp"]
+    rmsd_names = ["RMSD_I"]
+    rmsd_units = ["a.u"]
+
+    def __init__(self, curvatures=False):
+        self._restr = None
+        self.curvatures = curvatures
+        self.rmsd_names = ["RMSD_I"]
+        self.rmsd_units = ["a.u"]
+        # Quantities to cache each step
+        self._rmsds = None
+        self.restraints_calculator = None
+        self.param_restraints = False
+
+    @staticmethod
+    def calculate_residuals(Ih_table):
+        """Return the residual vector."""
+        R = Ih_table.intensities - (Ih_table.inverse_scale_factors * Ih_table.Ih_values)
+        return R
+
+    def calculate_gradients(self, Ih_table):
+        dIhbydpi = dIh_by_dpi(Ih_table)# already summed by group
+        r = self.calculate_residuals(Ih_table)
+        n = Ih_table.size
+        weights = Ih_table.weights
+        first_term = (-2.0 * Ih_table.weights * r * Ih_table.Ih_values * Ih_table.derivatives) / n
+        second_term = ((-2.0 * Ih_table.weights * r * Ih_table.inverse_scale_factors * Ih_table.h_index_matrix) * dIhbydpi) / n
+        sqrtweights = Ih_table.weights ** 0.5
+        third_term = 2.0 * flex.sum(sqrtweights * r) * (sqrtweights * Ih_table.Ih_values * Ih_table.derivatives) / (n ** 2)
+        fourth_term = 2.0 * flex.sum(sqrtweights * r) * ((sqrtweights * Ih_table.inverse_scale_factors * Ih_table.h_index_matrix) * dIhbydpi) / (n ** 2)
+        dvdpi = first_term + second_term + third_term + fourth_term
+        var = ((flex.sum(r ** 2 * weights)) / n) - ((flex.sum(r * (weights ** 0.5)))**2 / (n ** 2))
+        gradients = -2.0 * (1.0 - var) * var * dvdpi
+        return gradients
+
+    def compute_functional_gradients(self, Ih_table):
+        """Return the functional and gradients."""
+        resids = self.calculate_residuals(Ih_table)
+        gradients = self.calculate_gradients(Ih_table)
+        weights = Ih_table.weights
+        n = resids.size()
+        var = ((flex.sum(resids ** 2 * weights)) / n) - ((flex.sum(resids * (weights ** 0.5)))**2 / (n ** 2))
+        functional = (1.0 - var)**2
+        return functional, gradients
+
+    def rmsds(self, Ih_table, apm):
+        """Calculate RMSDs for the matches. Also calculate R-factors."""
+        R = []
+        #n = 0
+        work_blocks = Ih_table.blocked_data_list
+        self.rmsd_names = ["RMSD_I"]
+        self.rmsd_units = ["a.u"]
+        for block in work_blocks:
+            r = self.calculate_residuals(block)
+            weights = block.weights
+            n = weights.size()
+            var = ((flex.sum(r ** 2 * weights)) / n) - ((flex.sum(r * (weights ** 0.5)))**2 / (n ** 2))
+            R.append((1.0 - var)**2)
+        print(R)
+        self._rmsds = [(sum(R) / len(R)) ** 0.5]
+        return self._rmsds
+
+    def compute_restraints_functional_gradients_and_curvatures(self, apm):
+        return None
+
+    @staticmethod
+    def achieved():
+        """Method required by refinement engine."""
+        return False  # implement a method here?
+
 
 class ScalingTargetFixedIH(ScalingTarget):
     """An implementation of scaling target for when the scaling is to be
@@ -202,72 +266,15 @@ class ScalingTargetFixedIH(ScalingTarget):
         jacobian = row_multiply(Ih_table.derivatives, -1.0 * Ih_table.Ih_values)
         return jacobian
 
+def dIh_by_dpi(Ih_table):
+    gsq = Ih_table.inverse_scale_factors ** 2 * Ih_table.weights
+    sumgsq = gsq * Ih_table.h_index_matrix
 
-'''def calculate_curvatures(self, Ih_table)
-  """Calculate the second derivatives"""
-    # Make some shorthand notation
-    Ih_tab = self.scaler.Ih_table
-    w = Ih_tab.weights
-    I = Ih_tab.intensities
-    Ih = Ih_tab.Ih_values
-    g = Ih_tab.inverse_scale_factors
-    h_idx_transpose = Ih_tab.h_index_matrix.transpose()
-    gprime = self.apm.derivatives
-
-    #First calculate Ih' = ((suml wIg') - Ih(suml 2wgg'))/(suml wgg)
-    dIh = w * (I - (Ih * 2.0 * g))
-    gsq = g * g * w
-    v_inv = 1.0/(gsq * Ih_tab.h_index_matrix) #len(n_unique_groups)
-    Ihprime_numerator = h_idx_transpose * row_multiply(gprime, dIh)
-    Ihprime = row_multiply(Ihprime_numerator, v_inv)
-    #n_unique_groups x n_params matrix
-
-    Ihprime_expanded = (Ihprime.transpose() * Ih_tab.h_expand_matrix).transpose()
-    a = row_multiply(gprime, Ih)
-    b = row_multiply(Ihprime_expanded, g)
-    for j, col in enumerate(a.cols()):
-      b[:, j] += col #n_refl x n_params
-    rprime = b
-    rprimesq = elementwise_square(rprime)
-    # First term is sum_refl 2.0 * (r')2
-    first_term = 2.0 * w * rprimesq
-    #print(list(first_term))
-
-    # Second term is sum_refl -2.0 * r * r''
-    #  = -2.0 * r * (Ih g'' + 2g'Ih' + g Ih'') = A + B + C
-    # Ih '' = u'/v - Ih v'/v. so C = -2 r g u'/v + 2 r g Ih' v'/v = D + E
-    r = I - (g * Ih)
-    if self.apm.curvatures:
-      A = -2.0 * w * r * Ih * self.apm.curvatures #len n_params
-    B = row_multiply(gprime, (-4.0 * w * r)).transpose() * Ih_tab.h_index_matrix
-    B = B.transpose() * Ihprime_expanded #problem -
-    # need to do elementwise multiplication of two big matrices.
-
-    reduced_prefactor = (-2.0 * r * g * Ih_tab.h_index_matrix)
-    B = -4.0 * r * ((h_idx_transpose * gprime).transpose() * Ihprime) #len n_params
-    vprime_over_v = row_multiply((h_idx_transpose * row_multiply(gprime,
-      (2.0 * w * g))), v_inv) #len n_unique_groups x n_params
-    E = (-1.0 * reduced_prefactor * Ihprime) * vprime_over_v
-
-    #E = (2.0 * r * g * Ih_tab.h_index_matrix) * row_multiply(Ihprime,
-    # vprime_over_v) #len n_params
-
-    # n_unique_groups x n_params matrices
-    if self.apm.curvatures:
-      u1 = h_idx_transpose * row_multiply(self.apm.curvatures, w * I)
-      u4 = h_idx_transpose * row_multiply(self.apm.curvatures, 2.0 * g * Ih * w)
-    u2 = row_multiply((h_idx_transpose * row_multiply(gprime, 2.0 * w * g)), v_inv)
-    u3 = h_idx_transpose * row_multiply(elementwise_square(gprime), 2.0 * Ih * w)
-
-    if self.apm.curvatures:
-      D1 = reduced_prefactor * row_multiply(u1, v_inv) #len n_params
-      D4 = reduced_prefactor * row_multiply(u4, v_inv)
-    D2 = (reduced_prefactor * Ihprime) * u2 #len n_params
-    D3 = reduced_prefactor * row_multiply(u3, v_inv) #len n_params
-
-    if self.apm.curvatures:
-      curvs = A + B + D1 + D2 + D3 + D4 + E + first_term
-      return curvs
-    curvs = B + D2 + D3 + E + first_term
-
-    return curvs'''
+    dIh = (
+        Ih_table.intensities
+        - (Ih_table.Ih_values * 2.0 * Ih_table.inverse_scale_factors)
+    ) * Ih_table.weights
+    dIh_by_dpi = calc_dIh_by_dpi(
+        dIh, sumgsq, Ih_table.h_index_matrix, Ih_table.derivatives.transpose()
+    )
+    return dIh_by_dpi
