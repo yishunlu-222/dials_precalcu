@@ -45,6 +45,7 @@ from collections import defaultdict
 from cctbx import crystal, miller
 from libtbx.table_utils import simple_table
 from dials.array_family import flex
+from dials.algorithms.scaling.outlier_rejection import reject_outliers
 
 logger = logging.getLogger("dials")
 
@@ -132,7 +133,109 @@ def filter_reflection_table(reflection_table, intensity_choice, *args, **kwargs)
     return reflection_table
 
 
+def filtered_arrays_from_experiments_reflections(
+    experiments,
+    reflections,
+    outlier_rejection_after_filter=False,
+    partiality_threshold=0.99,
+):
+    """
+        Transform a list of experiments and reflections to a list of miller
+        arrays after filtering for bad values.
+
+        Raises:
+            ValueError: if no datasets remain after filtering.
+        """
+    miller_arrays = []
+    ids_to_del = []
+
+    for idx, (expt, refl) in enumerate(zip(experiments, reflections)):
+        crystal_symmetry = crystal.symmetry(
+            unit_cell=expt.crystal.get_unit_cell(),
+            space_group=expt.crystal.get_space_group(),
+        )
+
+        # want to use scale intensities if present, else sum + prf (if available)
+        if "intensity.scale.value" in refl:
+            intensity_choice = ["scale"]
+            intensity_to_use = "intensity.scale"
+        else:
+            assert "intensity.sum.value" in refl
+            intensity_to_use = "intensity.sum"
+            intensity_choice = ["sum"]
+            if "intensity.prf.value" in refl:
+                intensity_choice.append("profile")
+                intensity_to_use = "intensity.prf"
+
+        try:
+            refl = filter_reflection_table(
+                refl,
+                intensity_choice,
+                min_isigi=-5,
+                filter_ice_rings=False,
+                combine_partials=True,
+                partiality_threshold=partiality_threshold,
+            )
+        except ValueError:
+            logger.info(
+                "Dataset %s removed as no reflections left after filtering", idx
+            )
+            ids_to_del.append(idx)
+        else:
+            # If scale was chosen - will return scale or have raised ValueError
+            # If prf or sum, possible was no prf but want to continue.
+            try:
+                refl["intensity"] = refl[intensity_to_use + ".value"]
+                refl["variance"] = refl[intensity_to_use + ".variance"]
+            except RuntimeError:  # catch case where prf were removed.
+                refl["intensity"] = refl["intensity.sum.value"]
+                refl["variance"] = refl["intensity.sum.variance"]
+            if outlier_rejection_after_filter and intensity_to_use != "intensity.scale":
+                refl = reject_outliers(refl, expt, method="simple", zmax=12.0)
+                refl = refl.select(~refl.get_flags(refl.flags.outlier_in_scaling))
+
+            miller_set = miller.set(
+                crystal_symmetry, refl["miller_index"], anomalous_flag=False
+            )
+            intensities = miller.array(
+                miller_set, data=refl["intensity"], sigmas=flex.sqrt(refl["variance"])
+            )
+            intensities.set_observation_type_xray_intensity()
+            intensities.set_info(
+                miller.array_info(source="DIALS", source_type="pickle")
+            )
+            miller_arrays.append(intensities)
+
+    if not miller_arrays:
+        raise ValueError(
+            """No datasets remain after pre-filtering. Please check input data.
+The datasets may not contain any full reflections; the command line
+option partiality_threshold can be lowered to include partials."""
+        )
+
+    for id_ in ids_to_del[::-1]:
+        del experiments[id_]
+        del reflections[id_]
+
+    return miller_arrays
+
+
 def integrated_data_to_filtered_miller_array(reflections, exp_crystal):
+    """Transform a reflection table and crystal to a miller array, filtering
+    the input data.
+
+    Arguments:
+        reflections: A reflection table
+        exp_crystal: A dxtbx.model.crystal object
+
+    Returns:
+        A miller intensity array, with sigmas.
+
+    Raises:
+        ValueError: if no reflections remain after filtering.
+
+    """
+
     crystal_symmetry = crystal.symmetry(
         unit_cell=exp_crystal.get_unit_cell(), space_group=exp_crystal.get_space_group()
     )

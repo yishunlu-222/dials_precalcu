@@ -225,12 +225,18 @@ experiments file must also be specified with the option: reference= """
             )
 
         # Make miller array of the two datasets
-        test_miller_set = integrated_data_to_filtered_miller_array(
-            test_reflections, test_crystal
-        )
-        reference_miller_set = integrated_data_to_filtered_miller_array(
-            reference_reflections, reference_crystal
-        )
+        try:
+            test_miller_set = integrated_data_to_filtered_miller_array(
+                test_reflections, test_crystal
+            )
+        except ValueError:
+            raise Sorry("No reflections remain after filtering the test dataset")
+        try:
+            reference_miller_set = integrated_data_to_filtered_miller_array(
+                reference_reflections, reference_crystal
+            )
+        except ValueError:
+            raise Sorry("No reflections remain after filtering the reference dataset")
 
         from dials.algorithms.symmetry.reindex_to_reference import (
             determine_reindex_operator_against_reference,
