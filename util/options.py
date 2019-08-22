@@ -19,6 +19,7 @@ except ImportError:
 
 import libtbx.phil
 from dials.util import Sorry
+from dxtbx.model.experiment_list import ExperimentList
 
 tolerance_phil_scope = libtbx.phil.parse(
     """
@@ -1118,6 +1119,32 @@ class OptionParser(OptionParserBase):
         print("}")
 
 
+def renumber_table_id_columns(tables):
+    """Renumber the id columns in the tables from 0..n-1 while preserving
+    experiment identifiers mapping."""
+    new_id_ = 0
+    for table in tables:
+        table_id_values = sorted(list(set(table["id"]).difference({-1})))
+        highest_new_id = new_id_ + len(table_id_values) - 1
+        expt_ids_dict = table.experiment_identifiers()
+        new_ids_dict = {}
+        new_id_ = highest_new_id
+        while table_id_values:
+            val = table_id_values.pop()
+            sel = table["id"] == val
+            if val in expt_ids_dict:
+                # only delete here, add new at end to avoid clashes of new/old ids
+                new_ids_dict[new_id_] = expt_ids_dict[val]
+                del expt_ids_dict[val]
+            table["id"].set_selected(sel.iselection(), new_id_)
+            new_id_ -= 1
+        new_id_ = highest_new_id + 1
+        if new_ids_dict:
+            for i, v in new_ids_dict.items():
+                expt_ids_dict[i] = v
+    return tables
+
+
 def flatten_reflections(filename_object_list):
     """
     Flatten a list of reflections tables
@@ -1131,27 +1158,52 @@ def flatten_reflections(filename_object_list):
     """
     tables = [o.data for o in filename_object_list]
     if len(tables) > 1:
-        new_id_ = 0
-        for table in tables:
-            table_id_values = sorted(list(set(table["id"]).difference({-1})))
-            highest_new_id = new_id_ + len(table_id_values) - 1
-            expt_ids_dict = table.experiment_identifiers()
-            new_ids_dict = {}
-            new_id_ = highest_new_id
-            while table_id_values:
-                val = table_id_values.pop()
-                sel = table["id"] == val
-                if val in expt_ids_dict:
-                    # only delete here, add new at end to avoid clashes of new/old ids
-                    new_ids_dict[new_id_] = expt_ids_dict[val]
-                    del expt_ids_dict[val]
-                table["id"].set_selected(sel.iselection(), new_id_)
-                new_id_ -= 1
-            new_id_ = highest_new_id + 1
-            if new_ids_dict:
-                for i, v in new_ids_dict.items():
-                    expt_ids_dict[i] = v
+        tables = _renumber_table_id_columns(tables)
     return tables
+
+
+def sort_tables_to_experiments_order(reflection_tables, experiments):
+    """If experiment identifiers are set, attempt to match"""
+    assert len(reflection_tables) == len(experiments)
+    identifiers = []
+    for table in reflection_tables:
+        identifiers.extend(table.experiment_identifiers().values())
+    expt_identiers = list(experiments.identifiers())
+    if len(identifiers) == len(experiments) and set(identifiers) == set(
+        expt_identiers
+    ):  # all set so can now do the rearrangement
+        sorted_tables = []
+        for id_ in expt_identiers:
+            sorted_tables.append(reflection_tables[identifiers.index(id_)])
+        return sorted_tables
+    return tables
+
+
+def reflections_and_experiments_from_files(
+    reflection_file_object_list, experiment_file_object_list
+):
+    """Extract reflection tables and an experiment list from the files.
+
+    If experiment identifiers are set, the order of the experiment list is
+    changed to match """
+    tables = [o.data for o in reflection_file_object_list]
+
+    experiments = ExperimentList()
+    for o in experiment_file_object_list:
+        experiments.extend(o.data)
+
+    # if same number of experiments and tables, and identifiers set - can just
+    # rearrange tables list
+    if tables and (len(tables) == len(experiments)):
+        tables = sort_tables_to_experiments_order(tables, experiments)
+    # if different number of tables and experiments - then will want to
+    # split tables before reordering - leave this for now.
+
+    # now renumber id column in tables from 0..n-1
+    if len(tables) > 1:
+        tables = renumber_table_id_columns(tables)
+
+    return tables, experiments
 
 
 def flatten_experiments(filename_object_list):
@@ -1161,7 +1213,6 @@ def flatten_experiments(filename_object_list):
     :param filename_object_list: The parameter item
     :return: The flattened experiment lists
     """
-    from dxtbx.model.experiment_list import ExperimentList
 
     result = ExperimentList()
     for o in filename_object_list:
