@@ -6,15 +6,15 @@ from collections import namedtuple
 
 import six
 import six.moves.cPickle as pickle
-import uuid
 from dials.util import show_mail_on_error, Sorry
+from dials.util.options import flatten_experiments
+from dials.util.multi_dataset_handling import generate_experiment_identifiers
 from dxtbx.model.experiment_list import Experiment
 from dxtbx.model.experiment_list import ExperimentList
 from dxtbx.model.experiment_list import ExperimentListFactory
 from dxtbx.model.experiment_list import ExperimentListTemplateImporter
 from dxtbx.imageset import ImageGrid
 from dxtbx.imageset import ImageSequence
-from dials.util.options import flatten_experiments
 from libtbx.phil import parse
 
 logger = logging.getLogger("dials.command_line.import")
@@ -227,22 +227,13 @@ class ImageSetImporter(object):
                 raise Sorry("No experiments found")
 
         if self.params.identifier_type:
-            assign_unique_identifiers(experiments, self.params.identifier_type)
+            generate_experiment_identifiers(experiments, self.params.identifier_type)
 
         # Get a list of all imagesets
         imageset_list = experiments.imagesets()
 
         # Return the experiments
         return imageset_list
-
-
-def assign_unique_identifiers(experiments, identifier_type):
-    """Assign unique identifiers to each experiment."""
-    if identifier_type == "uuid":
-        for expt in experiments:
-            expt.identifier = str(uuid.uuid4())
-    elif identifier_type == "timestamp":
-        pass
 
 
 class ReferenceGeometryUpdater(object):
@@ -571,7 +562,7 @@ class MetaDataUpdater(object):
                         )
                     )
         if self.params.identifier_type:
-            assign_unique_identifiers(experiments, self.params.identifier_type)
+            generate_experiment_identifiers(experiments, self.params.identifier_type)
         # Return the experiments
         return experiments
 

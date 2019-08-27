@@ -44,6 +44,8 @@ def test_can_import_multiple_sequences(dials_data, tmpdir):
         tmpdir.join("experiments_multiple_sequences.expt").strpath
     )
     assert len(experiments) == 2
+    for experiment in experiments:
+        assert experiment.identifier != ""
 
 
 def test_with_mask(dials_data, tmpdir):
@@ -66,6 +68,7 @@ def test_with_mask(dials_data, tmpdir):
     experiments = load.experiment_list(
         tmpdir.join("experiments_with_mask.expt").strpath
     )
+    assert experiments[0].identifier != ""
     assert (
         experiments[0].imageset.external_lookup.mask.filename == mask_filename.strpath
     )
@@ -119,6 +122,7 @@ def test_override_geometry(dials_data, tmpdir):
     assert tmpdir.join("override_geometry.expt").check(file=1)
 
     experiments = load.experiment_list(tmpdir.join("override_geometry.expt").strpath)
+    assert experiments[0].identifier != ""
     imgset = experiments[0].imageset
 
     beam = imgset.get_beam()
@@ -163,6 +167,7 @@ def test_import_beam_centre(dials_data, tmpdir):
     assert tmpdir.join("mosflm_beam_centre.expt").check(file=1)
 
     experiments = load.experiment_list(tmpdir.join("mosflm_beam_centre.expt").strpath)
+    assert experiments[0].identifier != ""
     imgset = experiments[0].imageset
     beam_centre = imgset.get_detector()[0].get_beam_centre(imgset.get_beam().get_s0())
     assert beam_centre == pytest.approx((200, 100))
@@ -185,7 +190,7 @@ def test_import_beam_centre(dials_data, tmpdir):
     assert beam_centre == pytest.approx((200, 100))
 
 
-def test_slow_fast_beam_centre(dials_regression, run_in_tmpdir):
+def test_slow_fast_beam_centre(dials_regression, tmpdir):
     # test slow_fast_beam_centre with a multi-panel CS-PAD image
     impath = os.path.join(
         dials_regression,
@@ -205,6 +210,7 @@ def test_slow_fast_beam_centre(dials_regression, run_in_tmpdir):
     assert os.path.exists("slow_fast_beam_centre.expt")
 
     experiments = load.experiment_list("slow_fast_beam_centre.expt")
+    assert experiments[0].identifier != ""
     imgset = experiments[0].imageset
     # beam centre on 18th panel
     s0 = imgset.get_beam().get_s0()
@@ -249,6 +255,10 @@ def test_from_image_files(dials_data, tmpdir):
     assert not result.returncode
     assert tmpdir.join("imported.expt").check(file=1)
 
+    # check that an experiment identifier is assigned
+    exp = load.experiment_list(tmpdir.join("imported.expt").strpath)
+    assert exp[0].identifier != ""
+
 
 def test_from_template(dials_data, tmpdir):
     # Find the image files
@@ -265,6 +275,10 @@ def test_from_template(dials_data, tmpdir):
     )
     assert not result.returncode
     assert tmpdir.join("imported.expt").check(file=1)
+
+    # check that an experiment identifier is assigned
+    exp = load.experiment_list(tmpdir.join("imported.expt").strpath)
+    assert exp[0].identifier != ""
 
 
 def test_extrapolate_scan(dials_data, tmpdir):
@@ -283,6 +297,9 @@ def test_extrapolate_scan(dials_data, tmpdir):
     )
     assert not result.returncode
     assert tmpdir.join("import_extrapolate.expt").check(file=1)
+    # check that an experiment identifier is assigned
+    exp = load.experiment_list(tmpdir.join("import_extrapolate.expt").strpath)
+    assert exp[0].identifier != ""
 
 
 def test_with_convert_sequences_to_stills(dials_data, tmpdir):
