@@ -100,6 +100,7 @@ def targeted_scaling_algorithm(scaler):
         scaler.perform_scaling(
             engine=scaler.params.scaling_refinery.full_matrix_engine,
             max_iterations=scaler.params.scaling_refinery.full_matrix_max_iterations,
+            final_minimisation=True,
         )
 
     expand_and_do_outlier_rejection(scaler, calc_cov=True)

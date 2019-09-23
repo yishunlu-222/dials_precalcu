@@ -18,10 +18,11 @@ from dials.algorithms.scaling.model.components.scale_components import (
     SHScaleComponent,
 )
 from dials.algorithms.scaling.model.components.smooth_scale_components import (
-    SmoothScaleComponent1D,
+    # SmoothScaleComponent1D,
     SmoothBScaleComponent1D,
     SmoothScaleComponent2D,
     SmoothScaleComponent3D,
+    SmoothScaleComponent1DFixedFirst,
 )
 from dials.algorithms.scaling.scaling_utilities import sph_harm_table
 from dials_scaling_ext import (
@@ -286,7 +287,7 @@ class PhysicalScalingModel(ScalingModelBase):
         super(PhysicalScalingModel, self).__init__(configdict, is_scaled)
         if "scale" in configdict["corrections"]:
             scale_setup = parameters_dict["scale"]
-            self._components["scale"] = SmoothScaleComponent1D(
+            self._components["scale"] = SmoothScaleComponent1DFixedFirst(
                 scale_setup["parameters"], scale_setup["parameter_esds"]
             )
         if "decay" in configdict["corrections"]:

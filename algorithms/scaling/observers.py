@@ -100,7 +100,10 @@ class ScalingSummaryGenerator(Observer):
     def print_scaling_summary(self, scaling_script):
         """Log summary information after scaling."""
         if ScalingModelObserver().data:
-            logger.info(ScalingModelObserver().return_model_error_summary())
+            try:
+                logger.info(ScalingModelObserver().return_model_error_summary())
+            except Exception:
+                pass
         valid_ranges = get_valid_image_ranges(scaling_script.experiments)
         image_ranges = get_image_ranges(scaling_script.experiments)
         msg = []

@@ -14,6 +14,7 @@ from dials.algorithms.scaling.model.components.scale_components import (
 )
 from dials_scaling_ext import row_multiply
 from dials_refinement_helpers_ext import GaussianSmoother as GS1D
+from dials_refinement_helpers_ext import GaussianSmootherFirstFixed as GS1DFF
 from dials_refinement_helpers_ext import GaussianSmoother2D as GS2D
 from dials_refinement_helpers_ext import GaussianSmoother3D as GS3D
 
@@ -38,6 +39,24 @@ class GaussianSmoother1D(GS1D):
     def positions(self):
         """Return the smoother positions."""
         return list(super(GaussianSmoother1D, self).positions())
+
+
+class GaussianSmoother1DFF(GS1DFF):
+    """A 1D Gaussian smoother."""
+
+    def value_weight(self, x, value):
+        """Return the value, weight and sumweight at a single point."""
+        result = super(GaussianSmoother1DFF, self).value_weight(x, value)
+        return (result.get_value(), result.get_weight(), result.get_sumweight())
+
+    def multi_value_weight(self, x, value):
+        """Return the value, weight and sumweight at multiple points."""
+        result = super(GaussianSmoother1DFF, self).multi_value_weight(x, value)
+        return (result.get_value(), result.get_weight(), result.get_sumweight())
+
+    def positions(self):
+        """Return the smoother positions."""
+        return list(super(GaussianSmoother1DFF, self).positions())
 
 
 class GaussianSmoother2D(GS2D):
@@ -212,6 +231,75 @@ class SmoothScaleComponent1D(ScaleComponentBase, SmoothMixin):
         return value
 
 
+class SmoothScaleComponent1DFixedFirst(SmoothScaleComponent1D, SmoothMixin):
+    """A smoothly varying scale component in one dimension."""
+
+    null_parameter_value = 1.0
+
+    def __init__(self, initial_values, parameter_esds=None):
+        super(SmoothScaleComponent1DFixedFirst, self).__init__(
+            initial_values, parameter_esds
+        )
+        self._normalised_values = []
+
+    @property
+    def free_parameters(self):
+        return self._parameters[1:]
+
+    @free_parameters.setter
+    def free_parameters(self, parameters):
+        sel = flex.bool(self._parameters.size(), True)
+        sel[0] = False
+        self._parameters.set_selected(sel, parameters)
+
+    @property
+    def free_parameter_esds(self):
+        """Return the estimated standard deviations of the parameters."""
+        return self._parameter_esds[1:]
+
+    @free_parameter_esds.setter
+    def free_parameter_esds(self, esds):
+        assert len(esds) == len(self.free_parameters)
+        sel = flex.bool(self._parameters.size(), True)
+        sel[0] = False
+        if self._parameter_esds:
+            self._parameter_esds.set_selected(sel, esds)
+        else:
+            self._parameter_esds = flex.double(self.parameters.size(), 0.0)
+            self._parameter_esds.set_selected(sel, esds)
+
+    def set_new_parameters(self, new_parameters):
+        """Set new parameters of a different length i.e. after batch handling"""
+        self._parameters = new_parameters
+        self._parameter_esds = None
+        self._n_params = len(self._parameters)
+
+    def update_reflection_data(self, selection=None, block_selections=None):
+        """Set the normalised coordinate values and configure the smoother."""
+        self._normalised_values = []
+        self._n_refl = []
+        normalised_values = self.data["x"]
+        if selection:
+            normalised_values = normalised_values.select(selection)
+        # Make sure zeroed correctly.
+        normalised_values = normalised_values - flex.min(normalised_values)
+        phi_range_deg = [
+            floor(round(flex.min(normalised_values), 10)),
+            ceil(round(flex.max(normalised_values), 10)),
+        ]
+        self._smoother = GaussianSmoother1DFF(
+            phi_range_deg, self.nparam_to_val(self._n_params)
+        )
+        if block_selections:
+            block_selection_list = block_selections
+            for i, sel in enumerate(block_selection_list):
+                self._normalised_values.append(normalised_values.select(sel))
+                self._n_refl.append(self._normalised_values[i].size())
+        else:
+            self._normalised_values.append(normalised_values)
+            self._n_refl.append(normalised_values.size())
+
+
 class SmoothBScaleComponent1D(SmoothScaleComponent1D):
     """Subclass of SmoothScaleComponent1D to implement a smoothly
     varying B-factor correction."""
@@ -247,14 +335,32 @@ class SmoothBScaleComponent1D(SmoothScaleComponent1D):
             self._d_values.append(data)
 
     def calculate_scales_and_derivatives(self, block_id=0):
-        sdctuple = super(
-            SmoothBScaleComponent1D, self
-        ).calculate_scales_and_derivatives(block_id)
-        if self._n_refl[block_id] == 0:
-            return flex.double([]), sparse.matrix(0, 0)
+        # sdctuple = super(
+        #    SmoothBScaleComponent1D, self
+        # ).calculate_scales_and_derivatives(block_id)
+        if self._n_refl[block_id] > 1:
+            value, weight, sumweight = self._smoother.multi_value_weight(
+                self._normalised_values[block_id], self.value
+            )
+            inv_sw = 1.0 / sumweight
+            dv_dp = row_multiply(weight, inv_sw)
+        elif self._n_refl[block_id] == 1:
+            value, weight, sumweight = self._smoother.value_weight(
+                self._normalised_values[block_id][0], self.value
+            )
+            dv_dp = sparse.matrix(1, weight.size)
+            b = flex.double(weight.as_dense_vector() / sumweight)
+            b.reshape(flex.grid(1, b.size()))
+            dv_dp.assign_block(b, 0, 0)
+            value = flex.double(1, value)
+        # else:
+        #    return flex.double([]), sparse.matrix(0, 0)
+        # return value, dv_dp
+        # if self._n_refl[block_id] == 0:
+        #    return flex.double([]), sparse.matrix(0, 0)
         prefac = 1.0 / (2.0 * (self._d_values[block_id] * self._d_values[block_id]))
-        s = flex.exp(sdctuple[0] * prefac)
-        d = row_multiply(sdctuple[1], s * prefac)
+        s = flex.exp(value * prefac)
+        d = row_multiply(dv_dp, s * prefac)
         return s, d
 
     def calculate_scales(self, block_id=0):
