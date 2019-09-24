@@ -40,6 +40,7 @@ def do_error_analysis(scaler, reselect=True):
 def scaling_algorithm(scaler):
     """Main algorithm for scaling."""
     scaler.perform_scaling()
+    need_to_rescale = False
 
     if (
         scaler.params.reflection_selection.intensity_choice == "combine"
@@ -50,33 +51,36 @@ def scaling_algorithm(scaler):
 
         do_intensity_combination(scaler, reselect=True)
 
-        scaler.perform_scaling()
+        need_to_rescale = True
 
     if (
         scaler.params.weighting.optimise_errors
         or scaler.params.scaling_options.outlier_rejection
     ):
+        if need_to_rescale:
+            scaler.perform_scaling()
 
         expand_and_do_outlier_rejection(scaler)
 
         do_error_analysis(scaler, reselect=True)
 
+        need_to_rescale = True
+
+    if scaler.params.scaling_options.full_matrix:
+
+        scaler.perform_scaling(
+            engine=scaler.params.scaling_refinery.full_matrix_engine,
+            max_iterations=scaler.params.scaling_refinery.full_matrix_max_iterations,
+        )
+        need_to_scale = scaler.fix_initial_parameter()
+        if need_to_scale:
+            scaler.perform_scaling(
+                engine=scaler.params.scaling_refinery.full_matrix_engine,
+                max_iterations=1,
+                reduce_tolerance=True,
+            )
+    elif need_to_rescale:
         scaler.perform_scaling()
-
-    if (
-        scaler.params.scaling_options.full_matrix
-        and scaler.params.scaling_refinery.engine == "SimpleLBFGS"
-    ):
-
-        scaler.perform_scaling(
-            engine=scaler.params.scaling_refinery.full_matrix_engine,
-            max_iterations=scaler.params.scaling_refinery.full_matrix_max_iterations,
-        )
-        scaler.experiment.scaling_model.components["scale"].fix_initial()
-        scaler.perform_scaling(
-            engine=scaler.params.scaling_refinery.full_matrix_engine,
-            max_iterations=scaler.params.scaling_refinery.full_matrix_max_iterations,
-        )
 
     # The minimisation has only been done on a subset on the data, so apply the
     # scale factors to the whole reflection table.

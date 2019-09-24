@@ -78,6 +78,11 @@ surface_weight = 1e6
     .help = "Restraint weight applied to spherical harmonic terms in the"
             "absorption correction."
     .expert_level = 1
+fix_initial = True
+    .type = bool
+    .help = "If performing full matrix minimisation, in the final cycle,"
+            "constrain the initial parameter for more reliable parameter and"
+            "scale factor error estimates."
 """
 
 array_model_phil_str = """\
@@ -136,6 +141,10 @@ class ScalingModelBase(object):
     def is_scaled(self):
         """:obj:`bool`: Indicte whether this model has previously been refined."""
         return self._is_scaled
+
+    def fix_initial_parameter(self, params):
+        """Fix a parameter of the scaling model."""
+        return False
 
     def limit_image_range(self, new_image_range):
         """Modify the model if necessary due to reducing the image range.
@@ -305,6 +314,11 @@ class PhysicalScalingModel(ScalingModelBase):
     def consecutive_refinement_order(self):
         """:obj:`list`: a nested list of component names to indicate scaling order."""
         return [["scale", "decay"], ["absorption"]]
+
+    def fix_initial_parameter(self, params):
+        if "scale" in self.components and params.physical.fix_initial:
+            self.components["scale"].fix_initial_parameter()
+        return True
 
     def configure_components(self, reflection_table, experiment, params):
         """Add the required reflection table data to the model components."""

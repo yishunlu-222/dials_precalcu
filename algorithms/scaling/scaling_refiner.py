@@ -191,6 +191,10 @@ class ScalingRefinery(object):
         self._rmsd_tolerance = scaler.params.scaling_refinery.rmsd_tolerance
         self._parameters = prediction_parameterisation
 
+    def set_tolerance(self, tolerance):
+        """Set a tolerance."""
+        self._rmsd_tolerance = tolerance
+
     def test_rmsd_convergence(self):
         """Test for convergence of RMSDs"""
 

@@ -243,7 +243,7 @@ class SmoothScaleComponent1DFixedFirst(SmoothScaleComponent1D, SmoothMixin):
         self._normalised_values = []
         self._fixed_initial = False
 
-    def fix_initial(self):
+    def fix_initial_parameter(self):
         # switch smoother
         self._fixed_initial = True
         normalised_values = self.data["x"]
@@ -266,15 +266,13 @@ class SmoothScaleComponent1DFixedFirst(SmoothScaleComponent1D, SmoothMixin):
     @free_parameters.setter
     def free_parameters(self, parameters):
         if not self._fixed_initial:
-            initial = parameters[0]
-            parameters = parameters - initial + 1.0
-            print("shifted by %s" % (1.0 - initial))
+            # initial = parameters[0]
+            # parameters = parameters - initial + 1.0
             self._parameters = parameters
         else:
             sel = flex.bool(self._parameters.size(), True)
             sel[0] = False
             self._parameters.set_selected(sel, parameters)
-            print("set after fixing")
 
     @property
     def free_parameter_esds(self):
