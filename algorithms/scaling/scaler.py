@@ -164,11 +164,7 @@ class ScalerBase(Subject):
 
     @Subject.notify_event(event="performed_scaling")
     def perform_scaling(
-        self,
-        target_type=ScalingTarget,
-        engine=None,
-        max_iterations=None,
-        final_minimisation=False,
+        self, target_type=ScalingTarget, engine=None, max_iterations=None
     ):
         """Minimise the scaling model."""
         apm_factory = create_apm_factory(self)
@@ -178,9 +174,6 @@ class ScalerBase(Subject):
                 engine = self.params.scaling_refinery.engine
             if not max_iterations:
                 max_iterations = self.params.scaling_refinery.max_iterations
-            if (engine == "LevMar" or engine == "GaussNewton") and final_minimisation:
-                pass
-            # fix initial scale
             st = time.time()
             refinery = scaling_refinery(
                 engine=engine,

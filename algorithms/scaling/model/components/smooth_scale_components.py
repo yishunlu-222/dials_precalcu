@@ -241,32 +241,60 @@ class SmoothScaleComponent1DFixedFirst(SmoothScaleComponent1D, SmoothMixin):
             initial_values, parameter_esds
         )
         self._normalised_values = []
+        self._fixed_initial = False
+
+    def fix_initial(self):
+        # switch smoother
+        self._fixed_initial = True
+        normalised_values = self.data["x"]
+        # Make sure zeroed correctly.
+        normalised_values = normalised_values - flex.min(normalised_values)
+        phi_range_deg = [
+            floor(round(flex.min(normalised_values), 10)),
+            ceil(round(flex.max(normalised_values), 10)),
+        ]
+        self._smoother = GaussianSmoother1DFF(
+            phi_range_deg, self.nparam_to_val(self._n_params)
+        )
 
     @property
     def free_parameters(self):
-        return self._parameters[1:]
+        if self._fixed_initial:
+            return self._parameters[1:]
+        return self._parameters
 
     @free_parameters.setter
     def free_parameters(self, parameters):
-        sel = flex.bool(self._parameters.size(), True)
-        sel[0] = False
-        self._parameters.set_selected(sel, parameters)
+        if not self._fixed_initial:
+            initial = parameters[0]
+            parameters = parameters - initial + 1.0
+            print("shifted by %s" % (1.0 - initial))
+            self._parameters = parameters
+        else:
+            sel = flex.bool(self._parameters.size(), True)
+            sel[0] = False
+            self._parameters.set_selected(sel, parameters)
+            print("set after fixing")
 
     @property
     def free_parameter_esds(self):
         """Return the estimated standard deviations of the parameters."""
-        return self._parameter_esds[1:]
+        return self._parameter_esds
 
     @free_parameter_esds.setter
     def free_parameter_esds(self, esds):
-        assert len(esds) == len(self.free_parameters)
-        sel = flex.bool(self._parameters.size(), True)
-        sel[0] = False
-        if self._parameter_esds:
-            self._parameter_esds.set_selected(sel, esds)
+        # assert len(esds) == len(self.free_parameters)
+        if not self._fixed_initial:
+            self._parameter_esds = esds
         else:
-            self._parameter_esds = flex.double(self.parameters.size(), 0.0)
-            self._parameter_esds.set_selected(sel, esds)
+            sel = flex.bool(self._parameters.size(), True)
+            sel[0] = False
+            if self._parameter_esds:
+                self._parameter_esds.set_selected(sel, esds)
+                self._parameter_esds[0] = 0.0
+            else:
+                self._parameter_esds = flex.double(self.parameters.size(), 0.0)
+                self._parameter_esds.set_selected(sel, esds)
 
     def set_new_parameters(self, new_parameters):
         """Set new parameters of a different length i.e. after batch handling"""
@@ -287,7 +315,7 @@ class SmoothScaleComponent1DFixedFirst(SmoothScaleComponent1D, SmoothMixin):
             floor(round(flex.min(normalised_values), 10)),
             ceil(round(flex.max(normalised_values), 10)),
         ]
-        self._smoother = GaussianSmoother1DFF(
+        self._smoother = GaussianSmoother1D(
             phi_range_deg, self.nparam_to_val(self._n_params)
         )
         if block_selections:
