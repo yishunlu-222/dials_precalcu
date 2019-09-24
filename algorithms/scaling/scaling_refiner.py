@@ -191,6 +191,10 @@ class ScalingRefinery(object):
         self._rmsd_tolerance = scaler.params.scaling_refinery.rmsd_tolerance
         self._parameters = prediction_parameterisation
 
+    @property
+    def rmsd_tolerance(self):
+        return self._rmsd_tolerance
+
     def set_tolerance(self, tolerance):
         """Set a tolerance."""
         self._rmsd_tolerance = tolerance

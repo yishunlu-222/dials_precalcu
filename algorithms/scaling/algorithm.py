@@ -72,12 +72,14 @@ def scaling_algorithm(scaler):
             engine=scaler.params.scaling_refinery.full_matrix_engine,
             max_iterations=scaler.params.scaling_refinery.full_matrix_max_iterations,
         )
+        # check if we're fixing a parameter, if so, redo full matrix with
+        # smaller tolerance for one cycle.
         need_to_scale = scaler.fix_initial_parameter()
         if need_to_scale:
             scaler.perform_scaling(
                 engine=scaler.params.scaling_refinery.full_matrix_engine,
                 max_iterations=1,
-                reduce_tolerance=True,
+                tolerance=scaler.params.scaling_refinery.rmsd_tolerance / 4.0,
             )
     elif need_to_rescale:
         scaler.perform_scaling()

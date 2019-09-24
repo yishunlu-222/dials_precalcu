@@ -168,7 +168,7 @@ class ScalerBase(Subject):
         target_type=ScalingTarget,
         engine=None,
         max_iterations=None,
-        reduce_tolerance=False,
+        tolerance=None,
     ):
         """Minimise the scaling model."""
         apm_factory = create_apm_factory(self)
@@ -186,9 +186,8 @@ class ScalerBase(Subject):
                 prediction_parameterisation=apm,
                 max_iterations=max_iterations,
             )
-            if reduce_tolerance:
-                current_tol = refinery._rmsd_tolerance
-                refinery.set_tolerance(current_tol / 2.0)
+            if tolerance:
+                refinery.set_tolerance(tolerance)
             try:
                 refinery.run()
             except Exception as e:

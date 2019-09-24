@@ -29,18 +29,6 @@ namespace dials { namespace refinement { namespace boost_python {
       .def("value_weight", &GaussianSmoother::value_weight)
       .def("multi_value_weight", &GaussianSmoother::multi_value_weight);
 
-    class_<GaussianSmootherFirstFixed>("GaussianSmootherFirstFixed", no_init)
-      .def(init<vec2<double>, std::size_t>((arg("x_range"), arg("num_intervals"))))
-      .def("set_smoothing", &GaussianSmootherFirstFixed::set_smoothing)
-      .def("num_values", &GaussianSmootherFirstFixed::num_values)
-      .def("num_samples", &GaussianSmootherFirstFixed::num_samples)
-      .def("num_average", &GaussianSmootherFirstFixed::num_average)
-      .def("sigma", &GaussianSmootherFirstFixed::sigma)
-      .def("spacing", &GaussianSmootherFirstFixed::spacing)
-      .def("positions", &GaussianSmootherFirstFixed::positions)
-      .def("value_weight", &GaussianSmootherFirstFixed::value_weight)
-      .def("multi_value_weight", &GaussianSmootherFirstFixed::multi_value_weight);
-
     class_<SingleValueWeights>("SingleValueWeights", no_init)
       .def("get_value", &SingleValueWeights::get_value)
       .def("get_weight", &SingleValueWeights::get_weight)
