@@ -133,15 +133,7 @@ class ScalerBase(Subject):
 
     def get_blocks_for_minimisation(self):
         """Return the blocks to iterate over during refinement."""
-        if self.Ih_table.free_Ih_table:
-            return self.Ih_table.blocked_data_list[:-1]
         return self.Ih_table.blocked_data_list
-
-    def update_free_block(self, parameter_manager):
-        """Update the scales in the free block."""
-        if self.Ih_table.free_Ih_table:
-            free_block_id = len(self.Ih_table.blocked_data_list) - 1
-            self.update_for_minimisation(parameter_manager, free_block_id)
 
     ## Interface for algorithms using the scaler
 
@@ -235,9 +227,6 @@ class ScalerBase(Subject):
     def clear_Ih_table(self):
         """Delete the data from the current Ih_table."""
         self._Ih_table = []
-
-    def fix_initial_parameter(self):
-        return False
 
     def prepare_reflection_tables_for_output(self):
         """Finish adjust reflection table data at the end of the algorithm."""
@@ -386,7 +375,6 @@ class SingleDatasetScaler(object):
         )  # A selection of len n_suitable_refl of scaling subset selection
         self.scaling_selection = None  # As above, but with outliers deselected also
         self.free_set_selection = flex.bool(self.n_suitable_refl, False)
-        self._free_Ih_table = None  # An array of len n_suitable_refl
 
         # configure model
         sel_reflections = self.get_valid_reflections()
@@ -398,7 +386,9 @@ class SingleDatasetScaler(object):
         logger.info("The following corrections will be applied to this dataset: \n")
         logger.info(st.format())
         if "Imid" in self.experiment.scaling_model.configdict:
-            self._combine_intensities(self.experiment.scaling_model.configdict["Imid"])
+            self._combine_intensities_using_Imid(
+                self.experiment.scaling_model.configdict["Imid"]
+            )
         if not self._experiment.scaling_model.is_scaled:
             self.individual_outlier_rejection()
         self.scaling_selection = ~self.outliers
@@ -515,42 +505,26 @@ class SingleDatasetScaler(object):
                         sub, cumul_pos_dict[name], cumul_pos_dict[name2]
                     )
 
-    ## REFACTOR INTO MULTISCALERBASE
-
-    def combine_intensities(self):
-        """Combine prf and sum intensities to give optimal intensities."""
-        self._combine_intensities()
-
-    def _combine_intensities(self, Imid=None):
-        try:
-            if Imid is not None:
-                logger.info(
-                    "Using previously determined optimal intensity choice: %s\n",
-                    OrderedDict(
-                        [
-                            (Imid, str(round(Imid, 4))),
-                            (0, "profile intensities"),
-                            (1, "summation intensities"),
-                        ]
-                    )[Imid],
-                )
-            else:
-                logger.info("Performing profile/summation intensity optimisation.")
-            combiner = SingleDatasetIntensityCombiner(self, Imid)
-        except DialsMergingStatisticsError as e:
-            logger.info("Intensity combination failed with the error %s", e)
-        else:
-            intensity, variance = combiner.calculate_suitable_combined_intensities()
-            # update data in reflection table
-            self._reflection_table["intensity"].set_selected(
-                self.suitable_refl_for_scaling_sel.iselection(), intensity
-            )
-            self._reflection_table["variance"].set_selected(
-                self.suitable_refl_for_scaling_sel.iselection(), variance
-            )
-            self.experiment.scaling_model.record_intensity_combination_Imid(
-                combiner.max_key
-            )
+    def _combine_intensities_using_Imid(self, Imid):
+        logger.info(
+            "Using previously determined optimal intensity choice: %s\n",
+            OrderedDict(
+                [
+                    (Imid, str(round(Imid, 4))),
+                    (0, "profile intensities"),
+                    (1, "summation intensities"),
+                ]
+            )[Imid],
+        )
+        combiner = SingleDatasetIntensityCombiner(self, Imid)
+        intensity, variance = combiner.calculate_suitable_combined_intensities()
+        # update data in reflection table
+        isel = self.suitable_refl_for_scaling_sel.iselection()
+        self._reflection_table["intensity"].set_selected(isel, intensity)
+        self._reflection_table["variance"].set_selected(isel, variance)
+        self.experiment.scaling_model.record_intensity_combination_Imid(
+            combiner.max_key
+        )
 
     def expand_scales_to_all_reflections(self, calc_cov=False):
         """
@@ -650,6 +624,13 @@ class MultiScalerBase(ScalerBase):
         super(MultiScalerBase, self).__init__(single_scalers[0].params)
         self.single_scalers = single_scalers
 
+    def fix_initial_parameter(self):
+        """Fix the initial parameter in the first suitable scaler"""
+        for scaler in self.active_scalers:
+            fixed = scaler.experiment.scaling_model.fix_initial_parameter(self.params)
+            if fixed:
+                return fixed
+
     def remove_datasets(self, scalers, n_list):
         """
         Delete a scaler from the dataset.
@@ -702,16 +683,17 @@ class MultiScalerBase(ScalerBase):
                 dataset_id=i,
                 column="inverse_scale_factor",
             )
-            self.global_Ih_table.calc_Ih()
             if self._free_Ih_table:
                 self._free_Ih_table.update_data_in_blocks(
                     scaler.reflection_table["inverse_scale_factor"].select(
                         scaler.suitable_refl_for_scaling_sel
                     ),
-                    dataset_id=0,
+                    dataset_id=i,
                     column="inverse_scale_factor",
                 )
-                self._free_Ih_table.calc_Ih()
+        self.global_Ih_table.calc_Ih()
+        if self._free_Ih_table:
+            self._free_Ih_table.calc_Ih()
         logger.info(
             "Scale factors determined during minimisation have now been\n"
             "applied to all datasets.\n"
@@ -740,17 +722,6 @@ class MultiScalerBase(ScalerBase):
         self.Ih_table.update_weights(block_id)
         if calc_Ih:
             self.Ih_table.calc_Ih(block_id)
-        # The parallelisation below would work if sparse matrices were
-        # pickleable (I think!) - with more benefit for larger number of datasets.'''
-        """def task_wrapper(block):
-            s, d = RefinerCalculator.calculate_scales_and_derivatives(block)
-            return s, d
-        blocks = apm.apm_list
-        task_results = easy_mp.parallel_map(func=task_wrapper, iterable=blocks,
-            processes=n_datasets, method="multiprocessing",
-            preserve_exception_message=True
-        )
-        scales_list, derivs_list = zip(*task_results)"""
 
     def _update_model_data(self):
         for i, scaler in enumerate(self.active_scalers):
@@ -883,66 +854,44 @@ class MultiScalerBase(ScalerBase):
     def combine_intensities(self):
         """Combine reflection intensities, either jointly or separately."""
         if self.params.reflection_selection.combine.joint_analysis:
+            multicombiner = None
             logger.info(
                 "Performing multi-dataset profile/summation intensity optimisation."
             )
             try:
-                combiner = MultiDatasetIntensityCombiner(self)
+                multicombiner = MultiDatasetIntensityCombiner(self)
             except DialsMergingStatisticsError as e:
                 logger.info("Intensity combination failed with the error %s", e)
-            else:
-                for i, scaler in enumerate(self.active_scalers):
-                    intensity, variance = combiner.calculate_suitable_combined_intensities(
-                        i
+        for j, scaler in enumerate(self.active_scalers):
+            if not multicombiner:  # i.e not joint_analysis or if this failed
+                singlecombiner = None
+                try:
+                    singlecombiner = SingleDatasetIntensityCombiner(scaler)
+                except DialsMergingStatisticsError as e:
+                    logger.info(
+                        "Intensity combination failed for dataset %s with the error %s",
+                        j,
+                        e,
                     )
-                    scaler.reflection_table["intensity"].set_selected(
-                        scaler.suitable_refl_for_scaling_sel.iselection(), intensity
-                    )
-                    scaler.reflection_table["variance"].set_selected(
-                        scaler.suitable_refl_for_scaling_sel.iselection(), variance
-                    )
-                    self.global_Ih_table.update_data_in_blocks(
-                        intensity, i, column="intensity"
-                    )
-                    self.global_Ih_table.update_data_in_blocks(
-                        variance, i, column="variance"
-                    )
-                    scaler.experiment.scaling_model.record_intensity_combination_Imid(
-                        combiner.max_key
-                    )
-                    if self._free_Ih_table:
-                        self._free_Ih_table.update_data_in_blocks(
-                            intensity, i, column="intensity"
-                        )
-                        self._free_Ih_table.update_data_in_blocks(
-                            variance, i, column="variance"
-                        )
+            if multicombiner:
+                I, var = multicombiner.calculate_suitable_combined_intensities(j)
+                Imid = multicombiner.max_key
+            elif singlecombiner:
+                I, var = singlecombiner.calculate_suitable_combined_intensities()
+                Imid = singlecombiner.max_key
+            scaler.experiment.scaling_model.record_intensity_combination_Imid(Imid)
 
-                self.global_Ih_table.calc_Ih()
-                if self._free_Ih_table:
-                    self._free_Ih_table.calc_Ih()
-        else:
-            for i, scaler in enumerate(self.active_scalers):
-                scaler.combine_intensities()
-                intensity = scaler.reflection_table["intensity"].select(
-                    scaler.suitable_refl_for_scaling_sel
-                )
-                variance = scaler.reflection_table["variance"].select(
-                    scaler.suitable_refl_for_scaling_sel
-                )
-                self.global_Ih_table.update_data_in_blocks(
-                    intensity, i, column="intensity"
-                )
-                self.global_Ih_table.update_data_in_blocks(
-                    variance, i, column="variance"
-                )
-                if self._free_Ih_table:
-                    self._free_Ih_table.update_data_in_blocks(
-                        intensity, i, column="intensity"
-                    )
-                    self._free_Ih_table.update_data_in_blocks(
-                        variance, i, column="variance"
-                    )
+            isel = scaler.suitable_refl_for_scaling_sel.iselection()
+            scaler.reflection_table["intensity"].set_selected(isel, I)
+            scaler.reflection_table["variance"].set_selected(isel, var)
+            self.global_Ih_table.update_data_in_blocks(I, j, "intensity")
+            self.global_Ih_table.update_data_in_blocks(var, j, "variance")
+            if self._free_Ih_table:
+                self._free_Ih_table.update_data_in_blocks(I, j, column="intensity")
+                self._free_Ih_table.update_data_in_blocks(var, j, column="variance")
+        self.global_Ih_table.calc_Ih()
+        if self._free_Ih_table:
+            self._free_Ih_table.calc_Ih()
 
     def _select_all_reflections_for_scaling(self):
         for scaler in self.active_scalers:
@@ -1064,12 +1013,12 @@ class SingleScaler(MultiScalerBase):
     def __init__(self, single_scalers):
         super(SingleScaler, self).__init__(single_scalers)
         self._active_scalers = self.single_scalers
-        self._create_global_Ih_table()  # good to be same
+        self._create_global_Ih_table()
         # now select reflections from across the datasets
-        self._select_reflections_for_scaling()  # should be different
-        self._create_Ih_table()  # good to be same
+        self._select_reflections_for_scaling()
+        self._create_Ih_table()
         # now add data to scale components from datasets
-        self._update_model_data()  # good to be same
+        self._update_model_data()
 
     def update_for_minimisation(self, apm, block_id):
         """Update the scale factors and Ih for the next minimisation iteration."""
@@ -1122,9 +1071,7 @@ class MultiScaler(MultiScalerBase):
         Create a global_Ih_table, an Ih_table to use for minimisation and update
         the data in the model components.
         """
-        logger.info("Configuring a MultiScaler to handle the individual Scalers. \n")
         super(MultiScaler, self).__init__(single_scalers)
-        logger.info("Determining symmetry equivalent reflections across datasets.\n")
         self._active_scalers = self.single_scalers
         self._create_global_Ih_table()
         # now select reflections from across the datasets
@@ -1132,14 +1079,7 @@ class MultiScaler(MultiScalerBase):
         self._create_Ih_table()
         # now add data to scale components from datasets
         self._update_model_data()
-        logger.info("Completed configuration of MultiScaler. \n\n" + "=" * 80 + "\n")
         log_memory_usage()
-
-    def fix_initial_parameter(self):
-        for scaler in self.active_scalers:
-            fixed = scaler.experiment.scaling_model.fix_initial_parameter(self.params)
-            if fixed:
-                return fixed
 
 
 class TargetScaler(MultiScalerBase):
@@ -1211,14 +1151,14 @@ class TargetScaler(MultiScalerBase):
         )
 
 
-class NullScaler(ScalerBase):
+class NullScaler(object):
     """A singlescaler to allow targeted scaling against calculated intensities."""
 
     id_ = "null"
 
     def __init__(self, params, experiment, reflection):
         """Set the required properties to use as a scaler for targeted scaling."""
-        super(NullScaler, self).__init__(params)
+        self._params = params
         self._experiment = experiment
         self._reflection_table = reflection
         self.n_suitable_refl = self._reflection_table.size()
@@ -1241,6 +1181,11 @@ class NullScaler(ScalerBase):
         )
 
     @property
+    def params(self):
+        """The params phil scope object."""
+        return self._params
+
+    @property
     def experiment(self):
         """Return the experiment object for the dataset"""
         return self._experiment
@@ -1254,12 +1199,6 @@ class NullScaler(ScalerBase):
     def components(self):
         """Shortcut to scaling model components."""
         return self.experiment.scaling_model.components
-
-    def expand_scales_to_all_reflections(self, caller=None, calc_cov=False):
-        """Fill in abstract method, do nothing."""
-
-    def update_for_minimisation(self, apm, block_id=0):
-        """Fill in abstract method, do nothing."""
 
 
 def calc_sf_variances(components, var_cov):
