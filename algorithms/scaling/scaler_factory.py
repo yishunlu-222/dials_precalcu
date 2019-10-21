@@ -5,10 +5,8 @@ from __future__ import absolute_import, division, print_function
 import logging
 from libtbx import Auto
 from dials.array_family import flex
-from dials.algorithms.scaling.scaler import (
-    MultiScaler,
-    TargetScaler,
-    SingleScaler,
+from dials.algorithms.scaling.scaler import MultiScaler, TargetScaler, SingleScaler
+from dials.algorithms.scaling.single_dataset_scaler import (
     NullScaler,
     SingleDatasetScaler,
 )
