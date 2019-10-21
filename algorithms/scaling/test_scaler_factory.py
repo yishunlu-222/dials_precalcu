@@ -202,7 +202,7 @@ def test_SingleScalerFactory(generated_param, refl_to_filter, mock_scaling_compo
     ss = SingleScalerFactory.create(generated_param, exp, test_refl)
     assert isinstance(ss, SingleScaler)
     assert all(
-        i in ss.reflection_table
+        i in ss.active_scalers[0].reflection_table
         for i in ["inverse_scale_factor", "intensity", "variance"]
     )
 

@@ -191,7 +191,7 @@ def scale_single_dataset(reflection_table, experiment, params=None, model="physi
     from dials.algorithms.scaling.algorithm import scaling_algorithm
 
     scaler = scaling_algorithm(scaler)
-    return scaler.reflection_table
+    return scaler.active_scalers[0].reflection_table
 
 
 def create_auto_scaling_model(params, experiments, reflections):
