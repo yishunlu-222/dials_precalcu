@@ -79,11 +79,9 @@ class ScalerFactory(object):
         )
 
 
-class SingleScalerFactory(ScalerFactory):
-    """Factory for creating a scaler for a single dataset."""
-
+class SingleDatasetScalerFactory(ScalerFactory):
     @classmethod
-    def create(cls, params, experiment, reflection_table, for_multi=False):
+    def create(cls, params, experiment, reflection_table):
         """Perform reflection_table preprocessing and create a SingleScaler."""
 
         cls.ensure_experiment_identifier(experiment, reflection_table)
@@ -135,10 +133,6 @@ class SingleScalerFactory(ScalerFactory):
                 reasons,
             )
 
-        if not for_multi:
-            determine_reflection_selection_parameters(
-                params, [experiment], [reflection_table]
-            )
         if params.reflection_selection.method == "intensity_ranges":
             reflection_table = quasi_normalisation(reflection_table, experiment)
         if (
@@ -156,7 +150,19 @@ class SingleScalerFactory(ScalerFactory):
                 reflection_table = calc_crystal_frame_vectors(
                     reflection_table, experiment
                 )
-        scaler = SingleDatasetScaler(params, experiment, reflection_table)
+        return SingleDatasetScaler(params, experiment, reflection_table)
+
+
+class SingleScalerFactory(ScalerFactory):
+    """Factory for creating a scaler for a single dataset."""
+
+    @classmethod
+    def create(cls, params, experiment, reflection_table):
+        """Perform reflection_table preprocessing and create a SingleScaler."""
+        determine_reflection_selection_parameters(
+            params, [experiment], [reflection_table]
+        )
+        scaler = SingleDatasetScalerFactory.create(params, experiment, reflection_table)
         return SingleScaler([scaler])
 
 
@@ -195,7 +201,7 @@ class MultiScalerFactory(object):
         for i, (expt, refl) in enumerate(zip(experiments, reflections)):
             # Remove bad datasets that literally have no integrated reflections
             try:
-                scaler = SingleScalerFactory.create(params, expt, refl, for_multi=True)
+                scaler = SingleDatasetScalerFactory.create(params, expt, refl)
             except BadDatasetForScalingException as e:
                 logger.info(e)
                 idx_to_remove.append(i)
@@ -239,7 +245,7 @@ class TargetScalerFactory(object):
         for i, (expt, refl) in enumerate(zip(experiments[:-1], reflections[:-1])):
             # Remove bad datasets that literally have no integrated reflections
             try:
-                scaler = SingleScalerFactory.create(params, expt, refl, for_multi=True)
+                scaler = SingleDatasetScalerFactory.create(params, expt, refl)
             except BadDatasetForScalingException as e:
                 logger.info(e)
                 idx_to_remove.append(i)
@@ -274,7 +280,7 @@ class TargetScalerFactory(object):
         for i, (expt, refl) in enumerate(zip(experiments, reflections)):
             # Remove bad datasets that literally have no integrated reflections
             try:
-                scaler = SingleScalerFactory.create(params, expt, refl, for_multi=True)
+                scaler = SingleDatasetScalerFactory.create(params, expt, refl)
             except BadDatasetForScalingException as e:
                 logger.info(e)
                 idx_to_remove.append(i)
