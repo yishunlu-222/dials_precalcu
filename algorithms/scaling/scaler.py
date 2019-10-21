@@ -342,7 +342,7 @@ uncertainty in the scaling model""" + (
                 scaler.experiment.scaling_model.set_scaling_model_as_scaled()
 
 
-class SingleScaler(ScalerBase):
+class SingleDatasetScaler(ScalerBase):
     """Definition of a scaler for a single dataset."""
 
     id_ = "single"
@@ -359,13 +359,13 @@ class SingleScaler(ScalerBase):
             i in reflection_table
             for i in ["inverse_scale_factor", "intensity", "variance", "id"]
         )
-        super(SingleScaler, self).__init__(params)
+        super(SingleDatasetScaler, self).__init__(params)
         self._experiment = experiment
         n_model_params = sum(val.n_params for val in self.components.values())
         self._var_cov_matrix = sparse.matrix(n_model_params, n_model_params)
         self._initial_keys = list(reflection_table.keys())
         self._reflection_table = reflection_table
-        self._Ih_table = None  # stores data for reflections used for minimisation
+        # self._Ih_table = None  # stores data for reflections used for minimisation
         self.suitable_refl_for_scaling_sel = self._get_suitable_for_scaling_sel(
             self._reflection_table
         )
@@ -386,15 +386,15 @@ class SingleScaler(ScalerBase):
         self._configure_model_and_datastructures(for_multi=for_multi)
         if "Imid" in self.experiment.scaling_model.configdict:
             self._combine_intensities(self.experiment.scaling_model.configdict["Imid"])
-        if not self._experiment.scaling_model.is_scaled:
-            self.round_of_outlier_rejection()
-        if not for_multi:
+        # if not self._experiment.scaling_model.is_scaled:
+        #    self.round_of_outlier_rejection()
+        """if not for_multi:
             self._select_reflections_for_scaling()
             self._create_Ih_table()
             self._update_model_data()
         else:
-            self._global_Ih_table = None
-            self.scaling_selection = ~self.outliers
+            self._global_Ih_table = None"""
+        self.scaling_selection = ~self.outliers
         logger.info(
             "Completed preprocessing and initialisation for this dataset.\n"
             "\n" + "=" * 80 + "\n"
@@ -464,6 +464,8 @@ class SingleScaler(ScalerBase):
         """The variance covariance matrix for the parameters."""
         return self._var_cov_matrix
 
+    # KEEP
+
     def update_var_cov(self, apm):
         """
         Update the full parameter variance covariance matrix after a refinement.
@@ -504,16 +506,7 @@ class SingleScaler(ScalerBase):
                         sub, cumul_pos_dict[name], cumul_pos_dict[name2]
                     )
 
-    def update_for_minimisation(self, apm, block_id):
-        """Update the scale factors and Ih for the next minimisation iteration."""
-        apm_i = apm.apm_list[0]
-        scales_i, derivs_i = RefinerCalculator.calculate_scales_and_derivatives(
-            apm_i, block_id
-        )
-        self.Ih_table.set_derivatives(derivs_i, block_id)
-        self.Ih_table.set_inverse_scale_factors(scales_i, block_id)
-        self.Ih_table.update_weights(block_id)
-        self.Ih_table.calc_Ih(block_id)
+    ## REFACTOR INTO MULTISCALERBASE
 
     def combine_intensities(self):
         """Combine prf and sum intensities to give optimal intensities."""
@@ -565,6 +558,8 @@ class SingleScaler(ScalerBase):
             self.experiment.scaling_model.record_intensity_combination_Imid(
                 combiner.max_key
             )
+
+    # KEEP BUT RENAME, remove caller
 
     def expand_scales_to_all_reflections(self, caller=None, calc_cov=False):
         """
@@ -620,7 +615,7 @@ class SingleScaler(ScalerBase):
             self.reflection_table["inverse_scale_factor_variance"].set_selected(
                 scaled_isel, all_invsfvars
             )
-        if caller is None:
+        """if caller is None:
             self.global_Ih_table.update_data_in_blocks(
                 self.reflection_table["inverse_scale_factor"].select(
                     self.suitable_refl_for_scaling_sel
@@ -642,79 +637,20 @@ class SingleScaler(ScalerBase):
                 "Scale factors determined during minimisation have now been\n"
                 "applied to all reflections for dataset %s.\n",
                 self.reflection_table["id"][0],
-            )
+            )"""
 
-    def _select_reflections_for_scaling(self):
-        """Select a subset of reflections to use in minimisation."""
-        if self.params.reflection_selection.method == "quasi_random":
-            block = self.global_Ih_table.Ih_table_blocks[0]
-            loc_indices = block.Ih_table["loc_indices"]
-            block.Ih_table["s1c"] = (
-                self.reflection_table["s1c"]
-                .select(self.suitable_refl_for_scaling_sel)
-                .select(loc_indices)
-            )
-            suitable_table = self.get_valid_reflections()
-            presel = calculate_scaling_subset_ranges(
-                suitable_table, self.params, print_summary=True
-            )
-            preselection = presel.select(block.Ih_table["loc_indices"])
-            block = block.select(preselection)
-            selection_indices = calculate_scaling_subset_connected(
-                block, self.experiment, self.params
-            )
-            self.scaling_selection = flex.bool(self.n_suitable_refl, False)
-            self.scaling_selection.set_selected(selection_indices, True)
-            logger.info(
-                "%s reflections were selected for scale factor determination \n"
-                + "out of %s suitable reflections. ",
-                selection_indices.size(),
-                self.n_suitable_refl,
-            )
-        elif self.params.reflection_selection.method == "intensity_ranges":
-            overall_scaling_selection = calculate_scaling_subset_ranges_with_E2(
-                self.reflection_table, self.params
-            )
-            self.scaling_selection = overall_scaling_selection.select(
-                self.suitable_refl_for_scaling_sel
-            )
-            if self._free_Ih_table:
-                self.scaling_selection.set_selected(self.free_set_selection, False)
-        elif self.params.reflection_selection.method == "use_all" or (
-            self.params.reflection_selection.method == "random"
-            and (self.params.reflection_selection.n_random >= self.global_Ih_table.size)
-        ):
-            if self._free_Ih_table:
-                self.scaling_selection = ~self.free_set_selection
-            else:
-                self.scaling_selection = flex.bool(self.n_suitable_refl, True)
-        elif self.params.reflection_selection.method == "random":
-            n = self.params.reflection_selection.n_random
-            if self._free_Ih_table:
-                isel = flex.random_selection(self.global_Ih_table.size, n)
-                sel = flex.bool(self.global_Ih_table.size, False)
-                sel.set_selected(isel, True)
-                sel_Ih = self.global_Ih_table.Ih_table_blocks[0].select(sel)
-                loc_indices = sel_Ih.Ih_table["loc_indices"]
-                self.scaling_selection = flex.bool(self.n_suitable_refl, False)
-                self.scaling_selection.set_selected(loc_indices, True)
-            else:
-                isel = flex.random_selection(self.n_suitable_refl, n)
-                self.scaling_selection = flex.bool(self.n_suitable_refl, False)
-                self.scaling_selection.set_selected(isel, True)
-        else:
-            raise ValueError("Invalid choice for 'reflection_selection.method'.")
-        self.scaling_subset_sel = copy.deepcopy(self.scaling_selection)
-        self.scaling_selection &= ~self.outliers  # now apply outliers
+    # REMOVE
 
-    def _update_model_data(self):
+    '''def _update_model_data(self):
         """Use the data in the Ih_table to update the model data."""
         assert self.Ih_table is not None
         block_selections = self.Ih_table.get_block_selections_for_dataset(dataset=0)
         for component in self.components.values():
-            component.update_reflection_data(block_selections=block_selections)
+            component.update_reflection_data(block_selections=block_selections)'''
 
-    def _create_Ih_table(self):
+    # REMOVE
+
+    '''def _create_Ih_table(self):
         """Create an Ih_table from the reflection table using the scaling selection."""
         self._Ih_table = IhTable(
             [self.get_reflections_for_model_minimisation()],
@@ -730,7 +666,9 @@ class SingleScaler(ScalerBase):
                 self.suitable_refl_for_scaling_sel
             )
             new_vars = self.error_model.update_variances(variance, intensity)
-            self._Ih_table.update_data_in_blocks(new_vars, 0, column="variance")
+            self._Ih_table.update_data_in_blocks(new_vars, 0, column="variance")'''
+
+    # BRING INTO INIT
 
     def _configure_model_and_datastructures(self, for_multi=False):
         """
@@ -746,7 +684,7 @@ class SingleScaler(ScalerBase):
         self.experiment.scaling_model.configure_components(
             sel_reflections, self.experiment, self.params
         )
-        free_set_percentage = 0
+        """free_set_percentage = 0
         if self.params.scaling_options.use_free_set and not for_multi:
             free_set_percentage = self.params.scaling_options.free_set_percentage
         self._global_Ih_table = IhTable(
@@ -773,11 +711,13 @@ class SingleScaler(ScalerBase):
                 self.experiment.crystal.get_space_group(),
                 [self.free_set_selection.iselection()],
                 nblocks=1,
-            )
+            )"""
         rows = [[key, str(val.n_params)] for key, val in six.iteritems(self.components)]
         st = simple_table(rows, ["correction", "n_parameters"])
         logger.info("The following corrections will be applied to this dataset: \n")
         logger.info(st.format())
+
+    # REWORK - need to make an Ih_table? or call refl table method.
 
     @Subject.notify_event(event="performed_outlier_rejection")
     def round_of_outlier_rejection(self):
@@ -799,7 +739,9 @@ class SingleScaler(ScalerBase):
                 )[0]
                 self.outliers.set_selected(free_outlier_indices, True)
 
-    def make_ready_for_scaling(self, outlier=True):
+    # REMOVE
+
+    '''def make_ready_for_scaling(self, outlier=True):
         """
         Prepare the datastructures for a round of scaling.
 
@@ -811,7 +753,7 @@ class SingleScaler(ScalerBase):
         else:
             self.scaling_selection = copy.deepcopy(self.scaling_subset_sel)
         self._create_Ih_table()
-        self._update_model_data()
+        self._update_model_data()'''
 
     def clean_reflection_table(self):
         """Remove additional added columns that are not required for output."""
@@ -1171,6 +1113,98 @@ class MultiScalerBase(ScalerBase):
                 scaler.scaling_selection &= ~scaler.outliers
         else:
             raise ValueError("Invalid choice for 'reflection_selection.method'.")
+
+
+class SingleScaler(MultiScalerBase):
+
+    """A specialisation of multiscaler for single dataset case."""
+
+    id_ = "single"
+
+    def __init__(self, single_scalers):
+        super(SingleScaler, self).__init__(single_scalers)
+        self._active_scalers = self.single_scalers
+        self._create_global_Ih_table()  # good to be same
+        # now select reflections from across the datasets
+        self._select_reflections_for_scaling()  # should be different
+        self._create_Ih_table()  # good to be same
+        # now add data to scale components from datasets
+        self._update_model_data()  # good to be same
+
+    def update_for_minimisation(self, apm, block_id):
+        """Update the scale factors and Ih for the next minimisation iteration."""
+        apm_i = apm.apm_list[0]
+        scales_i, derivs_i = RefinerCalculator.calculate_scales_and_derivatives(
+            apm_i, block_id
+        )
+        self.Ih_table.set_derivatives(derivs_i, block_id)
+        self.Ih_table.set_inverse_scale_factors(scales_i, block_id)
+        self.Ih_table.update_weights(block_id)
+        self.Ih_table.calc_Ih(block_id)
+
+    def _select_reflections_for_scaling(self):
+        """Select a subset of reflections to use in minimisation."""
+        scaler = self.active_scalers[0]
+        if self.params.reflection_selection.method == "quasi_random":
+            block = self.global_Ih_table.Ih_table_blocks[0]
+            loc_indices = block.Ih_table["loc_indices"]
+            block.Ih_table["s1c"] = (
+                scaler.reflection_table["s1c"]
+                .select(scaler.suitable_refl_for_scaling_sel)
+                .select(loc_indices)
+            )
+            suitable_table = scaler.get_valid_reflections()
+            presel = calculate_scaling_subset_ranges(
+                suitable_table, self.params, print_summary=True
+            )
+            preselection = presel.select(block.Ih_table["loc_indices"])
+            block = block.select(preselection)
+            selection_indices = calculate_scaling_subset_connected(
+                block, scaler.experiment, self.params
+            )
+            scaler.scaling_selection = flex.bool(scaler.n_suitable_refl, False)
+            scaler.scaling_selection.set_selected(selection_indices, True)
+            logger.info(
+                "%s reflections were selected for scale factor determination \n"
+                + "out of %s suitable reflections. ",
+                selection_indices.size(),
+                scaler.n_suitable_refl,
+            )
+        elif self.params.reflection_selection.method == "intensity_ranges":
+            overall_scaling_selection = calculate_scaling_subset_ranges_with_E2(
+                scaler.reflection_table, self.params
+            )
+            scaler.scaling_selection = overall_scaling_selection.select(
+                scaler.suitable_refl_for_scaling_sel
+            )
+            if self._free_Ih_table:
+                scaler.scaling_selection.set_selected(scaler.free_set_selection, False)
+        elif self.params.reflection_selection.method == "use_all" or (
+            self.params.reflection_selection.method == "random"
+            and (self.params.reflection_selection.n_random >= self.global_Ih_table.size)
+        ):
+            if self._free_Ih_table:
+                scaler.scaling_selection = ~scaler.free_set_selection
+            else:
+                scaler.scaling_selection = flex.bool(scaler.n_suitable_refl, True)
+        elif self.params.reflection_selection.method == "random":
+            n = self.params.reflection_selection.n_random
+            if self._free_Ih_table:
+                isel = flex.random_selection(self.global_Ih_table.size, n)
+                sel = flex.bool(self.global_Ih_table.size, False)
+                sel.set_selected(isel, True)
+                sel_Ih = self.global_Ih_table.Ih_table_blocks[0].select(sel)
+                loc_indices = sel_Ih.Ih_table["loc_indices"]
+                scaler.scaling_selection = flex.bool(scaler.n_suitable_refl, False)
+                scaler.scaling_selection.set_selected(loc_indices, True)
+            else:
+                isel = flex.random_selection(scaler.n_suitable_refl, n)
+                scaler.scaling_selection = flex.bool(scaler.n_suitable_refl, False)
+                scaler.scaling_selection.set_selected(isel, True)
+        else:
+            raise ValueError("Invalid choice for 'reflection_selection.method'.")
+        scaler.scaling_subset_sel = copy.deepcopy(scaler.scaling_selection)
+        scaler.scaling_selection &= ~scaler.outliers  # now apply outliers
 
 
 class MultiScaler(MultiScalerBase):

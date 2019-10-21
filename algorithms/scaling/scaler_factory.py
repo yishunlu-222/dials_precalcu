@@ -10,6 +10,7 @@ from dials.algorithms.scaling.scaler import (
     TargetScaler,
     SingleScaler,
     NullScaler,
+    SingleDatasetScaler,
 )
 from dials.algorithms.scaling.scaling_utilities import (
     quasi_normalisation,
@@ -155,8 +156,8 @@ class SingleScalerFactory(ScalerFactory):
                 reflection_table = calc_crystal_frame_vectors(
                     reflection_table, experiment
                 )
-
-        return SingleScaler(params, experiment, reflection_table, for_multi)
+        scaler = SingleDatasetScaler(params, experiment, reflection_table)
+        return SingleScaler([scaler])
 
 
 class NullScalerFactory(ScalerFactory):
