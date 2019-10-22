@@ -1,24 +1,17 @@
 from __future__ import absolute_import, division, print_function
 import pytest
-from mock import Mock, MagicMock
+from mock import MagicMock
 from scitbx import sparse
 from libtbx import phil
 from dxtbx.model.experiment_list import ExperimentList
 from dxtbx.model import Crystal, Scan, Beam, Goniometer, Detector, Experiment
 from dials.array_family import flex
 from dials.util.options import OptionParser
-from dials.algorithms.scaling.scaling_library import create_scaling_model
-from dials.algorithms.scaling.scaler_factory import create_scaler
-from dials.algorithms.scaling.basis_functions import RefinerCalculator
 from dials.algorithms.scaling.scaling_utilities import calculate_prescaling_correction
-from dials.algorithms.scaling.scaler import (
-    SingleScaler,
-    calc_sf_variances,
-    MultiScaler,
-    TargetScaler,
-    NullScaler,
-)
+from dials.algorithms.scaling.scaler import SingleScaler, MultiScaler, TargetScaler
 from dials.algorithms.scaling.parameter_handler import ScalingParameterManagerGenerator
+from dials.algorithms.scaling.single_dataset_scaler import SingleDatasetScaler
+from dials.algorithms.scaling.model.model import KBScalingModel
 
 
 def side_effect_update_var(variances, intensities):
@@ -90,9 +83,7 @@ def generated_param():
     """Generate a param phil scope."""
     phil_scope = phil.parse(
         """
-      include scope dials.algorithms.scaling.scaling_options.phil_scope
-      include scope dials.algorithms.scaling.model.model.model_phil_scope
-      include scope dials.algorithms.scaling.scaling_refiner.scaling_refinery_phil_scope
+      include scope dials.command_line.scale.phil_scope
   """,
         process_includes=True,
     )
@@ -101,6 +92,8 @@ def generated_param():
         args=[], quick_parse=True, show_diff_phil=False
     )
     parameters.model = "KB"
+    parameters.reflection_selection.method = "use_all"
+    parameters.scaling_options.nproc = 2
     return parameters
 
 
@@ -137,18 +130,7 @@ def generated_refl(id_=0):
             (0.0, 0.0, 15.0),
         ]
     )
-    reflections["s1"] = flex.vec3_double(
-        [
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-        ]
-    )
+    reflections["s1"] = flex.vec3_double([(0.0, 0.1, 1.0)] * 8)
     reflections.set_flags(flex.bool(8, True), reflections.flags.integrated)
     reflections.set_flags(
         flex.bool([False] * 5 + [True] + [False] * 2),
@@ -202,18 +184,7 @@ def generated_refl_for_comb():
             (0.0, 0.0, 15.0),
         ]
     )
-    reflections["s1"] = flex.vec3_double(
-        [
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-            (0.0, 0.1, 1.0),
-        ]
-    )
+    reflections["s1"] = flex.vec3_double([(0.0, 0.1, 1.0)] * 8)
     reflections.set_flags(flex.bool(8, True), reflections.flags.integrated)
     reflections.set_flags(
         flex.bool([False] * 5 + [True] + [False] * 2), reflections.flags.bad_for_scaling
@@ -252,7 +223,208 @@ def mock_apm():
     return apm
 
 
-def test_SingleScaler_initialisation():
+# All scalers take a list of SingleDatasetScalers, so would be wise to use
+# real ones to catch any behaviour changes there.
+
+
+def generate_test_multiscaler():
+    # need a list of single dataset scalers
+    refl1 = generated_refl(id_=0)
+    refl2 = generated_refl(id_=1)
+    experiments = generated_exp(n=2)
+    params = generated_param()
+    experiments[0].scaling_model = KBScalingModel.from_data(
+        params, experiments[0], refl1
+    )
+    experiments[1].scaling_model = KBScalingModel.from_data(
+        params, experiments[1], refl2
+    )
+
+    single_scalers = [
+        SingleDatasetScaler(params, experiments[0], refl1),
+        SingleDatasetScaler(params, experiments[1], refl2),
+    ]
+    return MultiScaler(single_scalers)
+
+
+def generate_test_targetscaler():
+    # need a list of single dataset scalers
+    refl1 = generated_refl(id_=0)
+    refl2 = generated_refl(id_=1)
+    experiments = generated_exp(n=2)
+    params = generated_param()
+    experiments[0].scaling_model = KBScalingModel.from_data(
+        params, experiments[0], refl1
+    )
+    experiments[1].scaling_model = KBScalingModel.from_data(
+        params, experiments[1], refl2
+    )
+
+    single_scalers = [
+        SingleDatasetScaler(params, experiments[0], refl1),
+        SingleDatasetScaler(params, experiments[1], refl2),
+    ]
+    return TargetScaler([single_scalers[0]], [single_scalers[1]])
+
+
+def generate_test_singlescaler():
+    # need a list of single dataset scalers
+    refl1 = generated_refl(id_=0)
+    experiments = generated_exp(n=1)
+    params = generated_param()
+    experiments[0].scaling_model = KBScalingModel.from_data(
+        params, experiments[0], refl1
+    )
+    single_scalers = [SingleDatasetScaler(params, experiments[0], refl1)]
+    return SingleScaler(single_scalers)
+
+
+# Test scaler interface for scaling refiner
+
+
+def test_update_for_minimisation():
+    """Test the update_for_minimisation method of the scalers."""
+
+    # Test for multiscalerbase, singlescaler and targetscaler.
+    multiscaler = generate_test_multiscaler()
+    assert len(multiscaler.get_blocks_for_minimisation()) == 2
+
+    # To test, need a parameter manager
+    apmg = ScalingParameterManagerGenerator(
+        multiscaler.single_scalers, mode="concurrent"
+    )
+    apm = apmg.parameter_managers()[0]
+
+    # update should update the scales, derivatives and calc Ih.
+    # First check initial values are as expected.
+    block_0 = multiscaler.Ih_table.blocked_data_list[0]
+    block_1 = multiscaler.Ih_table.blocked_data_list[1]
+    assert set(block_0.inverse_scale_factors) == set([1.0])
+    assert set(block_1.inverse_scale_factors) == set([1.0])
+    assert list(block_0.Ih_values) == pytest.approx(([3.0] + [5.0 / 3.0] * 3) * 2)
+    assert list(block_1.Ih_values) == [2.0, 4.0, 2.0, 4.0]
+    assert block_0.derivatives is None
+    assert block_1.derivatives is None
+
+    # Update block 0 and test that only block 0 is updated
+    apm.set_param_vals(flex.double([2.0, 0.0, 1.0, 0.0]))
+    multiscaler.update_for_minimisation(apm, 0)
+    assert block_0.derivatives is not None
+    assert list(block_0.inverse_scale_factors) == [2.0] * 4 + [1.0] * 4
+    assert list(block_0.Ih_values) == ([1.8] + [1.0] * 3) * 2
+    assert block_1.derivatives is None
+    assert set(block_1.inverse_scale_factors) == set([1.0])
+    assert list(block_1.Ih_values) == [2.0, 4.0, 2.0, 4.0]
+
+    # Update block 1 and test that only block 1 is updated
+    apm.set_param_vals(flex.double([2.0, 0.0, 4.0, 0.0]))
+    multiscaler.update_for_minimisation(apm, 1)
+    assert block_0.derivatives is not None
+    assert list(block_0.inverse_scale_factors) == [2.0] * 4 + [1.0] * 4
+    assert list(block_0.Ih_values) == ([1.8] + [1.0] * 3) * 2
+    assert block_1.derivatives is not None
+    assert list(block_1.inverse_scale_factors) == [2.0] * 2 + [4.0] * 2
+    assert list(block_1.Ih_values) == [0.6, 1.2] * 2
+
+    # Repeat for singlescaler but just test once block updating.
+    singlescaler = generate_test_singlescaler()
+    assert len(singlescaler.get_blocks_for_minimisation()) == 2
+    block_0 = singlescaler.Ih_table.blocked_data_list[0]
+    block_1 = singlescaler.Ih_table.blocked_data_list[1]
+    assert list(block_0.Ih_values) == [3.0] + [5.0 / 3.0] * 3
+    assert list(block_1.Ih_values) == [2.0, 4.0]
+
+    apmg = ScalingParameterManagerGenerator(
+        singlescaler.single_scalers, mode="concurrent"
+    )
+    apm = apmg.parameter_managers()[0]
+    apm.set_param_vals(flex.double([2.0, 0.0]))
+    singlescaler.update_for_minimisation(apm, 0)
+    assert block_0.derivatives is not None
+    assert list(block_0.inverse_scale_factors) == [2.0] * 4
+    assert list(block_0.Ih_values) == ([1.5] + [5.0 / 6.0] * 3)
+    assert block_1.derivatives is None
+    assert set(block_1.inverse_scale_factors) == set([1.0])
+    assert list(block_1.Ih_values) == [2.0, 4.0]
+
+    # Repeat for targetscaler
+    targetscaler = generate_test_targetscaler()
+    assert len(targetscaler.get_blocks_for_minimisation()) == 2
+    block_0 = targetscaler.Ih_table.blocked_data_list[0]
+    block_1 = targetscaler.Ih_table.blocked_data_list[1]
+    expected_target_Ih_vals = [3.0] + [5.0 / 3.0] * 3
+    assert list(block_0.inverse_scale_factors) == [1.0] * 4
+    assert list(block_0.Ih_values) == expected_target_Ih_vals
+    assert list(block_1.Ih_values) == [2.0, 4.0]
+    apmg = ScalingParameterManagerGenerator(
+        targetscaler.active_scalers, mode="concurrent"
+    )
+    apm = apmg.parameter_managers()[0]
+    apm.set_param_vals(flex.double([2.0, 0.0]))
+    targetscaler.update_for_minimisation(apm, 0)
+    assert block_0.derivatives is not None
+    assert list(block_0.inverse_scale_factors) == [2.0] * 4
+    # target Ih values should be unchanged
+    assert list(block_0.Ih_values) == expected_target_Ih_vals
+    assert block_1.derivatives is None
+    assert set(block_1.inverse_scale_factors) == set([1.0])
+    assert list(block_1.Ih_values) == [2.0, 4.0]
+
+
+# Test scaler interface for algorithms using the scaler.
+def test_round_of_outlier_rejection():
+    """Test that a round of outlier rejection updates the outliers array in
+    the individual scalers."""
+    scaler = generate_test_multiscaler()
+    initial_outliers = [False, False, False, False, True, False, False]
+    assert list(scaler.single_scalers[0].outliers) == initial_outliers
+    assert list(scaler.single_scalers[1].outliers) == initial_outliers
+    updated_outliers = [True, False, False, False, True, False, False]
+    # and use a low zmax to force the first one to be an outlier
+    scaler.single_scalers[0].params.scaling_options.outlier_zmax = 0.7
+    scaler.round_of_outlier_rejection()
+    assert list(scaler.single_scalers[0].outliers) == updated_outliers
+    assert list(scaler.single_scalers[1].outliers) == updated_outliers
+
+
+def test_expand_scales_to_all_reflections():
+    # Test standard multi/single and target
+    pass
+
+
+def test_combine_intensities():
+    # Test standard multi/single and target
+    pass
+
+
+def test_make_ready_for_scaling():
+    pass
+
+
+def test_perform_scaling():
+    pass
+
+
+def test_perform_error_optimisation():
+    pass
+
+
+def test_clear_Ih_table():
+    pass
+
+
+def test_fix_initial_parameter():
+    pass
+
+
+def test_prepare_reflection_tables_for_output():
+    pass
+
+
+# Test relevant hidden methods.
+
+
+'''def test_SingleScaler_initialisation():
     """Test that all attributes are correctly set upon initialisation"""
     p, e, r = (generated_param(), generated_exp(), generated_refl())
     exp = create_scaling_model(p, e, r)
@@ -568,36 +740,6 @@ def generated_refl_2(exclude_refl=True):
     return reflections
 
 
-def test_SingleScaler_update_for_minimisation():
-    """Test the update_for_minimisation method of the singlescaler."""
-    # test_params.scaling_options.nproc = 1
-    p, e, r = (generated_param(), generated_exp(), generated_refl_2())
-    exp = create_scaling_model(p, e, r)
-    p.reflection_selection.method = "use_all"
-    single_scaler = SingleScaler(p, exp[0], r)
-    pmg = ScalingParameterManagerGenerator(
-        single_scaler.active_scalers,
-        single_scaler.params.scaling_refinery.refinement_order,
-    )
-    single_scaler.components["scale"].parameters /= 2.0
-    apm = pmg.parameter_managers()[0]
-
-    Ih_table = single_scaler.Ih_table.blocked_data_list[0]
-    Ih_table.calc_Ih()
-    assert list(Ih_table.inverse_scale_factors) == [1.0, 1.0]
-    assert list(Ih_table.Ih_values) == [10.0, 1.0]
-    single_scaler.update_for_minimisation(apm, 0)
-    # Should set new scale factors, and calculate Ih and weights.
-    bf = RefinerCalculator.calculate_scales_and_derivatives(apm.apm_list[0], 0)
-    assert list(Ih_table.inverse_scale_factors) == list(bf[0])
-    assert list(Ih_table.Ih_values) != [1.0, 10.0]
-    assert list(Ih_table.Ih_values) == pytest.approx(list(Ih_table.intensities / bf[0]))
-    for i in range(Ih_table.derivatives.n_rows):
-        for j in range(Ih_table.derivatives.n_cols):
-            assert Ih_table.derivatives[i, j] == pytest.approx(bf[1][i, j])
-    assert Ih_table.derivatives.non_zeroes == bf[1].non_zeroes
-
-
 # @pytest.mark.xfail(reason='need to rework mcok error model')
 def test_update_error_model(mock_errormodel, mock_errormodel2):
     """Test the update_error_model method"""
@@ -703,64 +845,4 @@ def test_sf_variance_calculation():
             b / (4.0 * (d2 ** 4.0)) + c / (d2 ** 2.0) + a,
             b / (4.0 * (d3 ** 4.0)) + c / (d3 ** 2.0) + a,
         ]
-    )
-
-
-def test_multiscaler_update_for_minimisation():
-    """Test the multiscaler update_for_minimisation method."""
-
-    p, e = (generated_param(), generated_exp(2))
-    p.reflection_selection.method = "use_all"
-    r1 = generated_refl(id_=0)
-    r1["intensity.sum.value"] = r1["intensity"]
-    r1["intensity.sum.variance"] = r1["variance"]
-    r2 = generated_refl(id_=1)
-    r2["intensity.sum.value"] = r2["intensity"]
-    r2["intensity.sum.variance"] = r2["variance"]
-    p.scaling_options.nproc = 2
-    p.model = "physical"
-    exp = create_scaling_model(p, e, [r1, r2])
-    singlescaler1 = create_scaler(p, [exp[0]], [r1])
-    singlescaler2 = create_scaler(p, [exp[1]], [r2])
-
-    multiscaler = MultiScaler([singlescaler1, singlescaler2])
-    pmg = ScalingParameterManagerGenerator(
-        multiscaler.active_scalers, multiscaler.params.scaling_refinery.refinement_order
-    )
-    multiscaler.single_scalers[0].components["scale"].parameters /= 2.0
-    multiscaler.single_scalers[1].components["scale"].parameters *= 1.5
-    apm = pmg.parameter_managers()[0]
-    multiscaler.update_for_minimisation(apm, 0)
-    multiscaler.update_for_minimisation(apm, 1)
-    # bf[0], bf[1] should be list of scales and derivatives
-    s1, d1 = RefinerCalculator.calculate_scales_and_derivatives(apm.apm_list[0], 0)
-    s2, d2 = RefinerCalculator.calculate_scales_and_derivatives(apm.apm_list[1], 0)
-    s3, d3 = RefinerCalculator.calculate_scales_and_derivatives(apm.apm_list[0], 1)
-    s4, d4 = RefinerCalculator.calculate_scales_and_derivatives(apm.apm_list[1], 1)
-    expected_scales_for_block_1 = s1
-    expected_scales_for_block_1.extend(s2)
-    expected_scales_for_block_2 = s3
-    expected_scales_for_block_2.extend(s4)
-
-    expected_derivatives_for_block_1 = sparse.matrix(
-        expected_scales_for_block_1.size(), apm.n_active_params
-    )
-    expected_derivatives_for_block_2 = sparse.matrix(
-        expected_scales_for_block_2.size(), apm.n_active_params
-    )
-
-    expected_derivatives_for_block_1.assign_block(d1, 0, 0)
-    expected_derivatives_for_block_1.assign_block(
-        d2, d1.n_rows, apm.apm_data[1]["start_idx"]
-    )
-    expected_derivatives_for_block_2.assign_block(d3, 0, 0)
-    expected_derivatives_for_block_2.assign_block(
-        d4, d3.n_rows, apm.apm_data[1]["start_idx"]
-    )
-
-    block_list = multiscaler.Ih_table.blocked_data_list
-
-    assert block_list[0].inverse_scale_factors == expected_scales_for_block_1
-    assert block_list[1].inverse_scale_factors == expected_scales_for_block_2
-    assert block_list[1].derivatives == expected_derivatives_for_block_2
-    assert block_list[0].derivatives == expected_derivatives_for_block_1
+    )'''
