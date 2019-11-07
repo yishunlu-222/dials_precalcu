@@ -18,7 +18,7 @@ class ErrorModelTarget(object):
 
     def __init__(self, error_model, starting_values=None):
         if not starting_values:
-            starting_values = [1.01, 0.02]
+            starting_values = [1.11, 0.02]
         # Note - don't initialise with b = 0.0 or it gets stuck on 0.0!!
         self.error_model = error_model
         self.x = starting_values
@@ -113,7 +113,7 @@ class ErrorModelTarget(object):
         """Compute the restraints for the functional and gradients.
 
         This is applicable to the basic error model so should be refactored."""
-        R1 = 200.0
+        R1 = 0.5
         R2 = 50.0
         residual_restraint = (R1 * ((1.0 - self.x[0]) ** 2)) + (
             R2 * ((0.0001 - self.x[1]) ** 2)
