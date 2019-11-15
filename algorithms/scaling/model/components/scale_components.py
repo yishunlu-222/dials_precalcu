@@ -305,6 +305,85 @@ class SingleBScaleFactor(ScaleComponentBase):
         return scales
 
 
+class SphericalAbsorptionComponent(ScaleComponentBase):
+
+    null_parameter_value = 0.0  # for T0, 0.0 for L1, L2
+    coefficients_list = None  # shared class variable to reduce memory load
+
+    def __init__(self, initial_values, parameter_esds=None):
+        super(SphericalAbsorptionComponent, self).__init__(
+            initial_values, parameter_esds
+        )
+        self._theta_values = []
+
+    @ScaleComponentBase.data.setter
+    def data(self, data):
+        """Set the data dict in the parent class."""
+        assert set(data.keys()) == {"sinsqtheta"}, set(data.keys())
+        self._data = data
+        # need theta scattering values ( is lamdba = 2dsin(theta))
+
+    def update_reflection_data(self, selection=None, block_selections=None):
+        """
+        Update the internal theta_values and n_refl lists.
+
+        Use the data stored in self.data, optionally with a boolean selection array
+        or list of flex.size_t index selections, to make a lists of n_refl and
+        d_value arrays (of length 1 or len(block_selections)), in order to allow
+        scale and derivative calculations.
+
+        Args:
+            selection: Optional, a flex.bool selection array to select a subset of
+                the internal data.
+            block_selections (list): Optional, a list of flex.size_t arrays to
+                select subsets of the internal data.
+        """
+        data = self.data["sinsqtheta"]
+        if selection:
+            self._theta_values = [data.select(selection)]
+        elif block_selections:
+            self._theta_values = [data.select(sel) for sel in block_selections]
+        else:
+            self._theta_values = [data]
+        self._n_refl = [v.size() for v in self._theta_values]
+
+    def calculate_scales(self, block_id=0):
+        """Calculate and return inverse scales for a given block."""
+        Astar = (
+            self._parameters[1] * self._theta_values[block_id]
+            + self._parameters[2] * (self._theta_values[block_id] ** 2)
+            + self._parameters[3] * (self._theta_values[block_id] ** 3)
+        ) + flex.double(self._n_refl[block_id], 1.0 + self._parameters[0] ** 2)
+
+        return 1.0 / Astar
+
+    def calculate_scales_and_derivatives(self, block_id=0):
+        """Calculate and return inverse scales for a given block."""
+        thetasq = self._theta_values[block_id]
+        theta4 = self._theta_values[block_id] ** 2
+        theta6 = self._theta_values[block_id] ** 3
+        Astar = (
+            self._parameters[1] * thetasq
+            + self._parameters[2] * theta4
+            + self._parameters[3] * theta6
+        ) + flex.double(self._n_refl[block_id], 1.0 + self._parameters[0] ** 2)
+        scales = 1.0 / Astar
+
+        derivatives = sparse.matrix(self._n_refl[block_id], 4)
+        prefactor = -1.0 * scales ** 2
+        derivs = [
+            prefactor * 2.0 * self._parameters[0],
+            prefactor * thetasq,
+            prefactor * theta4,
+            prefactor * theta6,
+        ]
+        for deriv, col in zip(derivs, derivatives.cols()):
+            for i, v in enumerate(deriv):
+                col[i] += v
+
+        return scales, derivatives
+
+
 class SHScaleComponent(ScaleComponentBase):
     """
     A model component for a spherical harmonic absorption correction.

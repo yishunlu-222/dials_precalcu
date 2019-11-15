@@ -2,7 +2,7 @@
 Tests for scale components module.
 """
 from __future__ import absolute_import, division, print_function
-from math import exp
+from math import exp, pi
 import pytest
 from scitbx import sparse
 from dials.array_family import flex
@@ -11,6 +11,7 @@ from dials.algorithms.scaling.model.components.scale_components import (
     SingleBScaleFactor,
     SingleScaleFactor,
     ScaleComponentBase,
+    SphericalAbsorptionComponent,
 )
 from dials.algorithms.scaling.model.components.smooth_scale_components import (
     SmoothScaleComponent1D,
@@ -19,6 +20,101 @@ from dials.algorithms.scaling.model.components.smooth_scale_components import (
     SmoothScaleComponent3D,
     SmoothMixin,
 )
+
+from dials.algorithms.scaling.parameter_handler import scaling_active_parameter_manager
+from dials.algorithms.scaling.target_function import ScalingTarget
+from dials.algorithms.scaling.Ih_table import IhTable
+from dials.algorithms.scaling.basis_functions import RefinerCalculator
+from dials.algorithms.refinement.engine import SimpleLBFGS
+from cctbx.sgtbx import space_group
+
+
+def test_SphericalAbsorptionComponent():
+    """Test the implementation of the Spherical Absorption correction."""
+
+    theta = flex.double([0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0])
+    sinsqtheta = flex.sin(theta * pi / 180.0) ** 2
+    # muR = 0.3 for a sphere, values for Astar.  g = 1/A*
+    Astar_0p3 = flex.double(
+        [1.5574, 1.5571, 1.5561, 1.5546, 1.5525, 1.5497, 1.5463, 1.5426, 1.5383]
+    )
+
+    Astar_1p0 = flex.double(
+        [4.1237, 4.1131, 4.0815, 4.0304, 3.9625, 3.8816, 3.7917, 3.6966, 3.6001]
+    )
+
+    class SingleComponentRefiner(SimpleLBFGS):
+        def __init__(
+            self, target, prediction_parameterisation, Ih_table, *args, **kwargs
+        ):
+            SimpleLBFGS.__init__(
+                self,
+                target=target,
+                prediction_parameterisation=prediction_parameterisation,
+                *args,
+                **kwargs
+            )
+            self._target = target
+            self._parameters = prediction_parameterisation
+            self._Ih_table = Ih_table
+
+        def prepare_for_step(self):
+            self._parameters.set_param_vals(self.x)
+            return
+
+        def update_journal(self):
+            pass
+
+        def compute_functional_gradients_and_curvatures(self):
+            """overwrite method to avoid calls to 'blocks' methods of target"""
+            self.prepare_for_step()
+
+            # update for minimisation
+            s, d = RefinerCalculator.calculate_scales_and_derivatives(
+                self._parameters, 0
+            )
+            self._Ih_table.set_derivatives(d, 0)
+            self._Ih_table.set_inverse_scale_factors(s, 0)
+            self._Ih_table.update_weights(0)
+            self._Ih_table.calc_Ih(0)
+
+            f, g = self._target.compute_functional_gradients(
+                self._Ih_table.blocked_data_list[0]
+            )
+            return f, g, None
+
+    # Icor = I / g = Imeas * Astar
+    # so if Icor = 1, Imeas = 1 / Astar
+    data = {"sinsqtheta": sinsqtheta}
+    reflections = flex.reflection_table()
+
+    reflections["variance"] = flex.double(9, 1.0)
+    reflections["miller_index"] = flex.miller_index([(0, 0, 1)] * 9)
+    reflections["inverse_scale_factor"] = flex.double(9, 1.0)
+
+    for A in [Astar_0p3, Astar_1p0]:
+        component = SphericalAbsorptionComponent(
+            initial_values=flex.double([0.00, 0.0, 0.0, 0.0])
+        )
+        intensities = 1.0 / A
+        component.data = data
+        component.update_reflection_data()
+
+        components = {"abs": component}
+        apm = scaling_active_parameter_manager(components, ["abs"])
+        target = ScalingTarget()
+        reflections["intensity"] = intensities
+        sg = space_group("P 1")
+        Ih_table = IhTable([reflections], sg)
+
+        refiner = SingleComponentRefiner(target, apm, Ih_table)
+        refiner.run()
+
+        scales = component.calculate_scales()
+        determined_correction = (1.0 / scales) * A[0]  # scale by 'global scale'
+        print("deltas:")
+        print(list(determined_correction - A))
+        assert list(determined_correction) == pytest.approx(A, rel=0.001)
 
 
 def test_ScaleComponentBase():
