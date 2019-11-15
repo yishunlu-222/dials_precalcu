@@ -7,7 +7,8 @@ from math import log, exp
 from dials.util import tabulate
 from dials.array_family import flex
 from scitbx import sparse
-from scitbx.math.distributions import normal_distribution
+
+# from scitbx.math.distributions import normal_distribution
 
 logger = logging.getLogger("dials")
 
@@ -56,10 +57,9 @@ class BasicErrorModelParameterisation(object):
     def set_param_vals(self, x):
         """method for refinement engine access"""
         self.x = x
-        if self.active_parameterisation == "a":
-            self.a = self.x[1]
-        elif self.active_parameterisation == "b":
-            self.b = self.x[0]
+        """if self.active_parameterisation == "a":
+            self.a = self.x[1]**0.5
+            self.b = (self.x[0] / self.x[1]) ** 0.5"""
 
     def get_param_vals(self):
         """method for refinement engine access"""
@@ -72,7 +72,7 @@ class BasicErrorModelParameterisation(object):
             self.x = [self.b]
         elif name == "a":
             self.active_parameterisation = "a"
-            self.x = [0.0, self.a]
+            self.x = [self.a ** 2, self.a ** 2 * self.b ** 2]
 
 
 class BasicErrorModel(object):
@@ -126,7 +126,7 @@ class BasicErrorModel(object):
     @property
     def parameters(self):
         """A list of the model parameters."""
-        return [self.components["a"].parameters[0], self.components["b"].parameters[0]]
+        return self.components["a"].parameters
 
     @parameters.setter
     def parameters(self, parameters):
@@ -186,27 +186,12 @@ class BasicErrorModel(object):
 
     def update_parameters(self, parameterisation):
         """Update the state of the error model."""
-        self.components["b"].parameters = [parameterisation.b]
-        if self.components["b"].Ih_table:
-            self.components["b"].update_for_minimisation(parameterisation)
-        self.components["a"].parameters = [parameterisation.a]
-        if "a" in self.free_components:
-            self.components["a"].reinitialise([parameterisation.a, parameterisation.b])
-
-    def update_parameters_after_minimisation(self, parameterisation):
-        """Update the state of the error model and prepare for next minimisation."""
-        if parameterisation.active_parameterisation == "a":
-            self.components["a"].parameters = [parameterisation.a]
-            # just refined a, so need to prepare b.
-            if self.components["b"].Ih_table:
-                self.components["b"].update_for_minimisation(parameterisation)
-        elif parameterisation.active_parameterisation == "b":
-            # update n
-            self.components["b"].parameters = [parameterisation.b]
-            # just refined b, so prepare a - need to reinitialise with 1.0,
-            # so that can determine new slope.
-            if "a" in self.free_components:
-                self.components["a"].reinitialise([1.0, parameterisation.b])
+        a = parameterisation.x[1] ** 0.5
+        b = (parameterisation.x[0] / parameterisation.x[1]) ** 0.5
+        self.components["a"].parameters = [a, b]
+        parameterisation.a = a
+        parameterisation.b = b
+        self.components["b"].update_for_minimisation(parameterisation)
 
     def __str__(self):
         a = abs(self.parameters[0])
@@ -448,21 +433,25 @@ class BasicErrorModelA(object):
 
     """The pieces needed for determining the 'a' error model component."""
 
-    def __init__(self, a=1.0):
-        self.parameters = [a]
+    def __init__(self, a=1.0, b=0.02):
+        self.parameters = [a, b]
         self.Ih_table = None
-        self.sortedx = None
-        self.sortedy = None
+        self.x = None
+        self.y = None
 
     def add_data(self, Ih_table):
         """Try to add data to component."""
-        sel = (Ih_table.intensities / (Ih_table.variances ** 0.5)) < 20.0
-        self.Ih_table = Ih_table.select(sel)
-        if not self.Ih_table.size:
+        sel = (Ih_table.intensities / (Ih_table.variances ** 0.5)) > 3.0
+        sel_Ih_table = Ih_table.select(sel)
+        scaled_I = sel_Ih_table.intensities / sel_Ih_table.inverse_scale_factors
+        self.y = ((scaled_I - sel_Ih_table.Ih_values) / scaled_I) ** 2
+        self.x = sel_Ih_table.variances / (sel_Ih_table.intensities ** 2)
+        self.Ih_table = sel_Ih_table
+        """if not self.Ih_table.size:
             raise ValueError(
                 "No suitable reflections remain for error model 'a' parameter minimisation."
             )
-        self.calc_sortedxy([1.0, 0.02])  # start with a = 1.0, b= 0.02
+        self.calc_sortedxy([1.0, 0.02])  # start with a = 1.0, b= 0.02"""
 
     @property
     def n_refl(self):
@@ -471,9 +460,10 @@ class BasicErrorModelA(object):
 
     def reinitialise(self, params):
         """Calculate the normalised deltas."""
-        self.calc_sortedxy(params)
+        pass
+        # self.calc_sortedxy(params)
 
-    def calc_sortedxy(self, params):
+    '''def calc_sortedxy(self, params):
         """Sort the x,y data."""
         sigmaprime = calc_sigmaprime(params, self.Ih_table)
         delta_hl = calc_deltahl(self.Ih_table, self.Ih_table.calc_nh(), sigmaprime)
@@ -489,4 +479,4 @@ class BasicErrorModelA(object):
         )
         central_sel = (self.sortedx < 1.5) & (self.sortedx > -1.5)
         self.sortedy = self.sortedy.select(central_sel)
-        self.sortedx = self.sortedx.select(central_sel)
+        self.sortedx = self.sortedx.select(central_sel)'''

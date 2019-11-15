@@ -373,6 +373,11 @@ class ErrorModelRefinery(object):
 
     def run(self):
         """Refine the model."""
+        self._refine_a()
+        print(list(self.parameterisation.x))
+        self.model.update_parameters(self.parameterisation)
+        return
+
         if not self.model.free_components:
             return
         if ("a" in self.model.free_components) and ("b" in self.model.free_components):

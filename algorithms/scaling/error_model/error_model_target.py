@@ -70,15 +70,15 @@ class ErrorModelTargetA(ErrorModelTarget):
     def calculate_residuals(self):
         """Return the residual vector"""
         x = self.parameterisation.x
-        R = (self.error_model.sortedy - (x[1] * self.error_model.sortedx) - x[0]) ** 2
+        R = (self.error_model.y - (x[1] * self.error_model.x) - x[0]) ** 2
         return R
 
     def calculate_gradients(self):
         "calculate the gradient vector"
         x = self.parameterisation.x
-        R = self.error_model.sortedy - (x[1] * self.error_model.sortedx) - x[0]
+        R = self.error_model.y - (x[1] * self.error_model.x) - x[0]
         gradient = flex.double(
-            [-2.0 * flex.sum(R), -2.0 * flex.sum(R * self.error_model.sortedx)]
+            [-2.0 * flex.sum(R), -2.0 * flex.sum(R * self.error_model.x)]
         )
         return gradient
 
