@@ -443,10 +443,36 @@ class BasicErrorModelA(object):
         """Try to add data to component."""
         sel = (Ih_table.intensities / (Ih_table.variances ** 0.5)) > 3.0
         sel_Ih_table = Ih_table.select(sel)
-        scaled_I = sel_Ih_table.intensities / sel_Ih_table.inverse_scale_factors
-        self.y = ((scaled_I - sel_Ih_table.Ih_values) / scaled_I) ** 2
+        delta = sel_Ih_table.intensities - (
+            sel_Ih_table.inverse_scale_factors * sel_Ih_table.Ih_values
+        )
+        n_minus_1 = sel_Ih_table.calc_nh() - 1
+        var_out = (
+            (delta ** 2 * sel_Ih_table.h_index_matrix)
+            * sel_Ih_table.h_expand_matrix
+            / n_minus_1
+        )
+        self.y = var_out / (sel_Ih_table.intensities ** 2)
         self.x = sel_Ih_table.variances / (sel_Ih_table.intensities ** 2)
-        self.Ih_table = sel_Ih_table
+        sel = self.x < 0.02
+        print(sel.count(True))
+        self.x = self.x.select(sel)
+        self.y = self.y.select(sel)
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        plt.scatter(self.x, self.y, s=1)
+        # plt.yscale("log")
+        # plt.xscale("log")
+        plt.savefig("errors.png")
+
+        """sel = self.x < 0.02
+        print(sel.count(True))
+        self.x = self.x.select(sel)
+        self.y = self.y.select(sel)"""
+        self.Ih_table = sel_Ih_table  # .select(sel)'''
         """if not self.Ih_table.size:
             raise ValueError(
                 "No suitable reflections remain for error model 'a' parameter minimisation."
