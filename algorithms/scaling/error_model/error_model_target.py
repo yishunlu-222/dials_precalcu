@@ -61,7 +61,8 @@ class ErrorModelTargetA(ErrorModelTarget):
         super(ErrorModelTargetA, self).__init__(
             error_model.components["a"], parameterisation
         )
-        self.parameterisation.set_active_parameter("a")
+        # self.x = flex.double(starting_values)
+        # self.parameterisation.set_active_parameter("a")
 
     def predict(self):
         """Do the next step of the prediction."""

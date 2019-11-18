@@ -373,9 +373,19 @@ class ErrorModelRefinery(object):
 
     def run(self):
         """Refine the model."""
+        self.model.components["a"].set_data_for_b_regression()
+        self.parameterisation.set_active_parameter("b")
         self._refine_a()
+        print("Linear result:")
         print(list(self.parameterisation.x))
         self.model.update_parameters(self.parameterisation)
+        self.model.components["a"].set_data_for_norm_slope_regression()
+        self.parameterisation.set_active_parameter("a")
+        self._refine_a()
+        print("norm fit result:")
+        print(list(self.parameterisation.x))
+        self.model.update_parameters(self.parameterisation)
+        # assert 0
         return
 
         if not self.model.free_components:

@@ -8,7 +8,7 @@ from dials.util import tabulate
 from dials.array_family import flex
 from scitbx import sparse
 
-# from scitbx.math.distributions import normal_distribution
+from scitbx.math.distributions import normal_distribution
 
 logger = logging.getLogger("dials")
 
@@ -69,10 +69,12 @@ class BasicErrorModelParameterisation(object):
         """Set the active parameter being minimised."""
         if name == "b":
             self.active_parameterisation = "b"
-            self.x = [self.b]
+            # doing linear reg, intercept = asq, slope = a2b2
+            self.x = [1.0, self.b ** 2]
         elif name == "a":
+            # doing linear reg, slope = a**2?, intercept expect 0.0
             self.active_parameterisation = "a"
-            self.x = [self.a ** 2, self.a ** 2 * self.b ** 2]
+            self.x = [0.0, 1.0]
 
 
 class BasicErrorModel(object):
@@ -86,6 +88,7 @@ class BasicErrorModel(object):
         self.components = {}
         self.free_components = []
         self.filtered_Ih_table = None
+        self.ab = 1.0
         a, b = (1.0, 0.02)
 
         error_params = params.weighting.error_model
@@ -186,12 +189,20 @@ class BasicErrorModel(object):
 
     def update_parameters(self, parameterisation):
         """Update the state of the error model."""
-        a = parameterisation.x[1] ** 0.5
-        b = (parameterisation.x[0] / parameterisation.x[1]) ** 0.5
-        self.components["a"].parameters = [a, b]
-        parameterisation.a = a
-        parameterisation.b = b
-        self.components["b"].update_for_minimisation(parameterisation)
+        if parameterisation.active_parameterisation == "b":
+            self.ab = parameterisation.x[1] ** 0.5
+            print("ab = %s" % self.ab)
+            self.components["a"].reinitialise([1.0, self.ab])
+        elif parameterisation.active_parameterisation == "a":
+            a = parameterisation.x[1]
+            b = self.ab / a
+            self.components["a"].parameters = [a, b]
+            parameterisation.a = a
+            parameterisation.b = b
+            print("a, b: %s, %s" % (a, b))
+            self.components["b"].update_for_minimisation(parameterisation)
+        # a = parameterisation.x[0] ** 0.5
+        # b = (parameterisation.x[1] / parameterisation.x[0]) ** 0.5
 
     def __str__(self):
         a = abs(self.parameters[0])
@@ -231,9 +242,9 @@ class BasicErrorModel(object):
 
     def clear_Ih_table(self):
         """Delete the Ih_table, to free memory."""
-        del self.components["a"].Ih_table
-        del self.components["b"].Ih_table
-        del self.filtered_Ih_table
+        # del self.components["a"].Ih_table
+        # del self.components["b"].Ih_table
+        # del self.filtered_Ih_table
 
 
 class BasicErrorModelB(object):
@@ -438,11 +449,25 @@ class BasicErrorModelA(object):
         self.Ih_table = None
         self.x = None
         self.y = None
+        self.x_reg = None
+        self.y_reg = None
+        self.sortedx = None
+        self.sortedy = None
+
+    def set_data_for_b_regression(self):
+        # set x = I2 / sig2, y = sigout2/sig2
+        self.x = self.x_reg
+        self.y = self.y_reg
+
+    def set_data_for_norm_slope_regression(self):
+        # set x as expected deltas sorted, y as observed deltas sorted.
+        self.x = self.sortedx
+        self.y = self.sortedy
 
     def add_data(self, Ih_table):
         """Try to add data to component."""
-        sel = (Ih_table.intensities / (Ih_table.variances ** 0.5)) > 3.0
-        sel_Ih_table = Ih_table.select(sel)
+        # sel = (Ih_table.intensities / (Ih_table.variances ** 0.5)) > 20.0
+        sel_Ih_table = Ih_table  # .select(sel)
         delta = sel_Ih_table.intensities - (
             sel_Ih_table.inverse_scale_factors * sel_Ih_table.Ih_values
         )
@@ -452,23 +477,53 @@ class BasicErrorModelA(object):
             * sel_Ih_table.h_expand_matrix
             / n_minus_1
         )
-        self.y = var_out / (sel_Ih_table.intensities ** 2)
-        self.x = sel_Ih_table.variances / (sel_Ih_table.intensities ** 2)
-        sel = self.x < 0.02
-        print(sel.count(True))
-        self.x = self.x.select(sel)
-        self.y = self.y.select(sel)
+
+        self.y_reg = var_out / sel_Ih_table.variances
+        self.x_reg = (sel_Ih_table.intensities ** 2) / sel_Ih_table.variances
+
+        sigmaprime = calc_sigmaprime(self.parameters, sel_Ih_table)
+        delta_hl = calc_deltahl(sel_Ih_table, sel_Ih_table.calc_nh(), sigmaprime)
+        norm = normal_distribution()
+        n = len(delta_hl)
+        if n <= 10:
+            a = 3 / 8
+        else:
+            a = 0.5
+        sort_perm = flex.sort_permutation(flex.double(delta_hl))
+        self.sortedy = flex.sorted(flex.double(delta_hl))
+        self.sortedx = flex.double(
+            [norm.quantile((i + 1 - a) / (n + 1 - (2 * a))) for i in range(n)]
+        )
+        central_sel = (self.sortedx < 1.5) & (self.sortedx > -1.5)
+        indices = sort_perm.select(central_sel)
+        self.y_reg = self.y_reg.select(indices)
+        self.x_reg = self.x_reg.select(indices)
+        sel = flex.bool(delta_hl.size(), False)
+        sel.set_selected(indices, True)
+        self.Ih_table = sel_Ih_table.select(sel)
+
+        self.sortedy = self.sortedy.select(central_sel)
+        self.sortedx = self.sortedx.select(central_sel)
+
+        cutoff_slope = 1.0 + (0.04 * self.x_reg)
+        sel = (self.y_reg - cutoff_slope) < 0.0
+        print(sel.count(False))
+        print(sel.size())
+        self.x_reg = self.x_reg.select(sel)
+        self.y_reg = self.y_reg.select(sel)
+        self.Ih_table = self.Ih_table.select(sel)
+
         import matplotlib
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        plt.scatter(self.x, self.y, s=1)
+        plt.scatter(self.x_reg, self.y_reg, s=1)
         # plt.yscale("log")
         # plt.xscale("log")
         plt.savefig("errors.png")
 
-        """sel = self.x < 0.02
+        '''"""sel = self.x < 0.02
         print(sel.count(True))
         self.x = self.x.select(sel)
         self.y = self.y.select(sel)"""
@@ -486,10 +541,9 @@ class BasicErrorModelA(object):
 
     def reinitialise(self, params):
         """Calculate the normalised deltas."""
-        pass
-        # self.calc_sortedxy(params)
+        self.calc_sortedxy(params)
 
-    '''def calc_sortedxy(self, params):
+    def calc_sortedxy(self, params):
         """Sort the x,y data."""
         sigmaprime = calc_sigmaprime(params, self.Ih_table)
         delta_hl = calc_deltahl(self.Ih_table, self.Ih_table.calc_nh(), sigmaprime)
@@ -505,4 +559,4 @@ class BasicErrorModelA(object):
         )
         central_sel = (self.sortedx < 1.5) & (self.sortedx > -1.5)
         self.sortedy = self.sortedy.select(central_sel)
-        self.sortedx = self.sortedx.select(central_sel)'''
+        self.sortedx = self.sortedx.select(central_sel)

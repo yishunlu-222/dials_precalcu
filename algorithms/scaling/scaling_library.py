@@ -26,6 +26,7 @@ from dials.algorithms.scaling.scaling_utilities import (
     DialsMergingStatisticsError,
 )
 from dials.util.multi_dataset_handling import get_next_unique_id
+from dials.util import Sorry
 from iotbx import cif, mtz
 from libtbx import phil
 from mock import Mock
@@ -423,7 +424,8 @@ def merging_stats_from_scaled_array(
             )
         else:
             anom_result = False
-    except RuntimeError:
+    except (RuntimeError, Sorry) as e:
+        logger.info("Error encountered: %s", e)
         raise DialsMergingStatisticsError(
             "Failure during merging statistics calculation"
         )
