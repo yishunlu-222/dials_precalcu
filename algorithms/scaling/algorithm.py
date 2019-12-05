@@ -68,7 +68,7 @@ def prepare_input(params, experiments, reflections):
         for r in reflections:
             ids.extend(r.experiment_identifiers().keys())
         logger.info(
-            "\nDataset ids for retained datasets are: %s \n",
+            "\nDataset ids for retained datasets are: %s, \nhowever renumbering may occur\n",
             ",".join(str(i) for i in ids),
         )
 

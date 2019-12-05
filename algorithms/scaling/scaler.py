@@ -1170,7 +1170,7 @@ class MultiScalerBase(ScalerBase):
                 total_combined = scaler.scaling_selection.count(True)
                 rows.append(
                     [
-                        scaler.experiment.identifier,
+                        i,
                         str(indices_for_dataset.size()),
                         str(total_this_dataset[i]),
                         str(total_combined),
