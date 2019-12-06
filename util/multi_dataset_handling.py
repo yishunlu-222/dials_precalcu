@@ -248,7 +248,7 @@ def select_datasets_on_ids(
     if exclude_datasets:
         identifiers_to_exclude = []
         for k in exclude_datasets:
-            if k not in id_map:
+            if int(k) not in id_map:
                 raise ValueError(
                     """Attempting to select datasets based on identifiers that
 are not found in the experiment list / reflection tables."""
@@ -260,7 +260,7 @@ are not found in the experiment list / reflection tables."""
     elif use_datasets:
         identifiers_to_use = []
         for k in use_datasets:
-            if k not in id_map:
+            if int(k) not in id_map:
                 raise ValueError(
                     """Attempting to select datasets based on identifiers that
 are not found in the experiment list / reflection tables."""
