@@ -26,7 +26,8 @@ class active_parameter_manager(object):
     component.
     """
 
-    def __init__(self, components, selection_list):
+    def __init__(self, target, components, selection_list):
+        self.target = target
         self.x = flex.double([])
         self.components = OrderedDict()
         self.derivatives = None
@@ -101,7 +102,8 @@ class multi_active_parameter_manager(object):
     is used to initialise an active parameter manager of type apm_class.
     """
 
-    def __init__(self, components_list, selection_lists, apm_class):
+    def __init__(self, target, components_list, selection_lists, apm_class):
+        self.target = target
         self.x = flex.double([])
         self.derivatives = None
         self.components_list = []  # A list of the component names.
@@ -117,7 +119,7 @@ class multi_active_parameter_manager(object):
         for j, (components, selection_list) in enumerate(
             zip(components_list, selection_lists)
         ):
-            self.apm_list.append(apm_class(components, selection_list))
+            self.apm_list.append(apm_class(target, components, selection_list))
             if not all_same_components:
                 logger.info(
                     "Components to be refined in this cycle for dataset %s: %s",
@@ -170,6 +172,27 @@ class multi_active_parameter_manager(object):
             i += n
 
 
+class shared_active_parameter_manager(object):
+
+    """Class to enforce sharing of model components.
+
+    Intercept calls to a multi_apm, to override set_params calls and manage
+    reshaping of gradient/jacobian during minimisation.
+    """
+
+    def __init__(self, target, multi_apm):
+        self.target = target
+        self.x = flex.double([])
+        self.multi_apm = multi_apm  # to be passed to target for calcs
+        # some way to indicate shared components?
+
+    def set_param_vals(self, x):
+        self.x = x
+
+    def get_param_vals(self):
+        return self.x
+
+
 class ParameterManagerGenerator(object):
     """
     Class to generate multi-dataset parameter managers for minimisation.
@@ -180,12 +203,13 @@ class ParameterManagerGenerator(object):
     on the data_manager.consecutive_refinement_order property).
     """
 
-    def __init__(self, data_managers, apm_type, mode="concurrent"):
+    def __init__(self, data_managers, apm_type, target, mode="concurrent"):
         if mode not in ["concurrent", "consecutive"]:
             raise ValueError(
                 "Bad value for refinement order mode: %s, expected %s"
                 % (mode, " or ".join(["concurrent", "consecutive"]))
             )
+        self.target = target
         self.data_managers = data_managers
         self.apm_type = apm_type
         self.mode = mode
@@ -217,7 +241,9 @@ class ParameterManagerGenerator(object):
     def _parameter_managers_concurrent(self):
         components = [s.components for s in self.data_managers]
         return [
-            multi_active_parameter_manager(components, self.param_lists, self.apm_type)
+            multi_active_parameter_manager(
+                self.target, components, self.param_lists, self.apm_type
+            )
         ]
 
     def _parameter_managers_consecutive(self):
@@ -229,4 +255,6 @@ class ParameterManagerGenerator(object):
                     params.append(param_list.pop(0))
                 else:
                     params.append([])
-            yield multi_active_parameter_manager(components, params, self.apm_type)
+            yield multi_active_parameter_manager(
+                self.target, components, params, self.apm_type
+            )

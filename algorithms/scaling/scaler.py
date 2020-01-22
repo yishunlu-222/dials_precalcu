@@ -171,8 +171,9 @@ class ScalerBase(Subject):
     def _perform_scaling(
         self, target_type, engine=None, max_iterations=None, tolerance=None
     ):
+        target = target_type()
         pmg = ScalingParameterManagerGenerator(
-            self.active_scalers, self.params.scaling_refinery.refinement_order
+            self.active_scalers, target, self.params.scaling_refinery.refinement_order
         )
         for apm in pmg.parameter_managers():
             if not engine:
@@ -183,7 +184,7 @@ class ScalerBase(Subject):
             refinery = scaling_refinery(
                 engine=engine,
                 scaler=self,
-                target=target_type(),
+                target=target,
                 prediction_parameterisation=apm,
                 max_iterations=max_iterations,
             )

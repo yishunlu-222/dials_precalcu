@@ -17,7 +17,7 @@ class scaling_active_parameter_manager(active_parameter_manager):
     mimimisation cycles for scaling.
     """
 
-    def __init__(self, components, selection_list):
+    def __init__(self, target, components, selection_list):
         self.constant_g_values = None
         for component, obj in six.iteritems(components):
             if component not in selection_list:
@@ -30,7 +30,7 @@ class scaling_active_parameter_manager(active_parameter_manager):
                     for n in range(n_blocks):
                         self.constant_g_values[n] *= obj.calculate_scales(n)
         super(scaling_active_parameter_manager, self).__init__(
-            components, selection_list
+            target, components, selection_list
         )
         n_obs = []
         for component in components:
@@ -49,7 +49,7 @@ class ScalingParameterManagerGenerator(ParameterManagerGenerator):
 
     """Class to generate parameter manager for scaling."""
 
-    def __init__(self, data_managers, mode):
+    def __init__(self, data_managers, target, mode):
         super(ScalingParameterManagerGenerator, self).__init__(
-            data_managers, scaling_active_parameter_manager, mode
+            data_managers, scaling_active_parameter_manager, target, mode
         )
