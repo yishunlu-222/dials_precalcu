@@ -187,6 +187,163 @@ evidence to rule out completely, possibly due to limited data.""",
         return 0.0  # should this be zero or a small number?
 
 
+class GlidePlane(Subject):
+
+    zero_plane = None  # e.g 1 if h0l, 2 if hk0 is plane to inspect
+    axis_repeats = []  # repeat of present reflections e.g 2 or 4
+    centering_repeats = None
+    name = None
+
+    def __init__(self):
+        super(GlidePlane, self).__init__(events=["selected data for scoring"])
+        self.equivalent_axes = []
+        self.n_refl_used = (0.0, 0.0)
+        self.miller_axis_vals = []
+        self.miller_indices = []
+        self.i_over_sigma = []
+        self.intensities = []
+        self.sigmas = []
+        self.mean_I_sigma_abs = 0.0
+        self.mean_I_sigma = 0.0
+        self.mean_I_abs = 0.0
+        self.mean_I = 0.0
+
+    def select_reflections_in_plane(self, miller_indices):
+        """Select reflections along the screw axis."""
+        h, k, l = miller_indices.as_vec3_double().parts()
+        if self.zero_plane == 0:
+            selection = h == 0
+        elif self.zero_plane == 1:
+            selection = k == 0
+        else:
+            selection = l == 0
+        return selection
+
+    @Subject.notify_event(event="selected data for scoring")
+    def get_all_suitable_reflections(self, reflection_table):
+        refl = reflection_table
+        print(refl.size())
+        sel = self.select_reflections_in_plane(refl["miller_index"])
+        self.miller_indices = refl["miller_index"].select(sel)
+        # self.miller_axis_vals = miller_idx.as_vec3_double().parts()[self.axis_idx]
+        self.intensities = refl["intensity"].select(sel)
+        self.sigmas = refl["variance"].select(sel) ** 0.5
+        self.i_over_sigma = self.intensities / self.sigmas
+        # first get rid of any centering repeats
+        if self.centering_repeats:
+            for k, v in self.centering_repeats.items():
+                vals = self.miller_indices.as_vec3_double().parts()[k]
+                sel = vals.iround() % v == 0
+                self.miller_indices = self.miller_indices.select(sel)
+                self.intensities = self.intensities.select(sel)
+                self.sigmas = self.sigmas.select(sel)
+                self.i_over_sigma = self.i_over_sigma.select(sel)
+
+    def score_axis(self, reflection_table, significance_level=0.95):
+        assert significance_level in [0.95, 0.975, 0.99]
+        self.get_all_suitable_reflections(reflection_table)
+
+        k = self.axis_repeats.keys()[0]
+        v = self.axis_repeats.values()[0]
+
+        vals = self.miller_indices.as_vec3_double().parts()[k]
+        expected_sel = vals.iround() % v == 0
+        expected = self.i_over_sigma.select(expected_sel)
+        expected_abs = self.i_over_sigma.select(~expected_sel)
+        self.n_refl_used = (expected.size(), expected_abs.size())
+
+        # Limit to best #n reflections to avoid weak at high res - use wilson B?
+        if not expected or not expected_abs:
+            return 0.0
+
+        # z = (sample mean - population mean) / standard error
+        S_E_abs = 1.0  # errors probably correlated so say standard error = 1
+        S_E_pres = 1.0  # / expected.size() ** 0.5
+
+        self.mean_I_sigma_abs = flex.mean(expected_abs)
+        self.mean_I_sigma = flex.mean(expected)
+
+        self.mean_I = flex.mean(self.intensities.select(expected_sel))
+        self.mean_I_abs = flex.mean(self.intensities.select(~expected_sel))
+
+        z_score_absent = self.mean_I_sigma_abs / S_E_abs
+        z_score_present = self.mean_I_sigma / S_E_pres
+
+        # get a p-value for z > z_score
+        P_absent = 0.5 * (1.0 + math.erf(z_score_absent / (2 ** 0.5)))
+        P_present = 0.5 * (1.0 + math.erf(z_score_present / (2 ** 0.5)))
+
+        # sanity check - is most of intensity in 'expected' channel?
+        intensity_test = self.mean_I_sigma > (20.0 * self.mean_I_sigma_abs)
+
+        cutoffs = {0.95: 1.645, 0.975: 1.960, 0.99: 2.326}
+        cutoff = cutoffs[significance_level]
+
+        if z_score_absent > cutoff and not intensity_test:
+            # z > 1.65 in only 5% of cases for normal dist
+            # significant nonzero intensity where expected absent.
+            return (1.0 - P_absent) * P_present
+        elif z_score_absent > cutoff:
+            # results appear inconsistent - significant i_over_sigma_abs, but this
+            # is still low compared to i_over_sigma_expected
+            # try removing the highest absent reflection in case its an outlier
+            outlier_msg = (
+                """Screw axis %s could only be assigned after removing a suspected outlier
+from the expected 'absent' reflections."""
+                % self.name
+            )
+            if expected_abs.size() <= 1:
+                logger.info(outlier_msg)
+                return P_present
+            sel = flex.sort_permutation(expected_abs)
+            sorted_exp_abs = expected_abs.select(sel)
+            mean_i_sigma_abs = flex.mean(sorted_exp_abs[:-1])
+            if (mean_i_sigma_abs / S_E_abs) > cutoff:
+                # Still looks like reflections in expected absent
+                logger.info(
+                    """Test results for %s appear inconsistent (significant nonzero intensity for
+'absent' reflections, but majority of intensity in reflection condition).
+There may be a set of weak reflections due to pseudosymmetry.""",
+                    self.name,
+                )
+                # Still high intensity of absent, so return as before
+                return (1.0 - P_absent) * P_present
+            # Looks like there was an outlier, now 'absent' reflections ~ 0.
+            self.mean_I_sigma_abs = mean_i_sigma_abs
+            self.mean_I_abs = flex.mean(
+                self.intensities.select(~expected_sel).select(sel)[:-1]
+            )
+            if z_score_present > cutoff:
+                logger.info(outlier_msg)
+                return P_present
+            # else in the uncertain case
+        elif z_score_present > cutoff:  # evidence with confidence
+            return P_present
+        logger.info(
+            """No evidence to suggest a screw axis for %s, but insufficient
+evidence to rule out completely, possibly due to limited data.""",
+            self.name,
+        )
+        return 0.0  # should this be zero or a small number?
+
+
+class MonoCGlide(GlidePlane):
+    """Definition of a Monoclinic c-glide"""
+
+    zero_plane = 1  # e.g 1 if h0l, 2 if hk0 is plane to inspect
+    axis_repeats = {2: 2}  # repeat of present reflections e.g l = 2n
+    centering_repeats = {0: 2}  # axis, repeat i.e. h = 2n
+    name = "c-glide"
+
+
+class CGlide(GlidePlane):
+    """Definition of a c-glide"""
+
+    zero_plane = 1  # e.g 1 if h0l, 2 if hk0 is plane to inspect
+    axis_repeats = {2: 2}  # repeat of present reflections e.g l = 2n
+    name = "c-glide"
+
+
 class ScrewAxis21c(ScrewAxis):
     """Definition of a 21c screw axis"""
 

@@ -5,7 +5,7 @@ from dials.util import tabulate
 from cctbx import sgtbx
 
 from dials.algorithms.symmetry.absences.laue_groups_info import (
-    laue_groups,
+    construct_laue_groups,
     score_screw_axes,
     score_space_groups,
 )
@@ -14,7 +14,7 @@ logger = logging.getLogger("dials")
 
 
 def run_systematic_absences_checks(
-    experiments, merged_reflections, significance_level=0.95
+    experiments, merged_reflections, chiral=True, significance_level=0.95
 ):
     """Check for systematic absences in the data for the laue group.
 
@@ -26,13 +26,14 @@ def run_systematic_absences_checks(
     space_group = experiments[0].crystal.get_space_group()
     laue_group = str(space_group.build_derived_patterson_group().info())
     logger.info("Laue group: %s", laue_group)
-    if laue_group not in laue_groups:
+    lauegroups = construct_laue_groups(chiral)
+    if laue_group not in lauegroups:
         logger.info("No absences to check for this laue group")
         return
 
     # Score the screw axes.
     screw_axes, screw_axis_scores = score_screw_axes(
-        laue_groups[laue_group], merged_reflections, significance_level
+        lauegroups[laue_group], merged_reflections, significance_level
     )
 
     logger.info(
@@ -65,9 +66,7 @@ def run_systematic_absences_checks(
     )
 
     # Score the space groups from the screw axis scores.
-    space_groups, scores = score_space_groups(
-        screw_axis_scores, laue_groups[laue_group]
-    )
+    space_groups, scores = score_space_groups(screw_axis_scores, lauegroups[laue_group])
 
     logger.info(
         "%s",
@@ -80,11 +79,19 @@ def run_systematic_absences_checks(
     # Find the best space group and update the experiments.
     best_sg = space_groups[scores.index(max(scores))]
     logger.info("Recommended space group: %s", best_sg)
-    if "enantiomorphic pairs" in laue_groups[laue_group]:
-        if best_sg in laue_groups[laue_group]["enantiomorphic pairs"]:
+    if "enantiomorphic pairs" in lauegroups[laue_group]:
+        if best_sg in lauegroups[laue_group]["enantiomorphic pairs"]:
             logger.info(
                 "Space group with equivalent score (enantiomorphic pair): %s",
-                laue_groups[laue_group]["enantiomorphic pairs"][best_sg],
+                lauegroups[laue_group]["enantiomorphic pairs"][best_sg],
+            )
+    if "equivalent_nonchiral_groups" in lauegroups[laue_group]:
+        if best_sg in lauegroups[laue_group]["equivalent_nonchiral_groups"]:
+            logger.info(
+                "Space groups with equivalent scores (indistinguishable by absences): %s",
+                ", ".join(
+                    lauegroups[laue_group]["equivalent_nonchiral_groups"][best_sg]
+                ),
             )
 
     new_sg = sgtbx.space_group_info(symbol=best_sg).group()

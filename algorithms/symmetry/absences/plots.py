@@ -14,6 +14,8 @@ def color_axis_data(name, miller_axis_vals):
         colors = [1 if m % 3 == 0 else 0 for m in miller_axis_vals]
     elif name.startswith("61"):
         colors = [1 if m % 6 == 0 else 0 for m in miller_axis_vals]
+    else:
+        colors = []
     return colors
 
 

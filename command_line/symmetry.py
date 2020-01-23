@@ -30,7 +30,7 @@ from dials.algorithms.symmetry.absences.run_absences_checks import (
     run_systematic_absences_checks,
 )
 from dials.algorithms.symmetry.absences.laue_groups_info import (
-    laue_groups as laue_groups_for_absence_analysis,
+    construct_laue_groups as laue_groups_for_absence_analysis,
 )
 from dials.command_line.reindex import reindex_experiments
 from dials.util.exclude_images import (
@@ -57,6 +57,12 @@ normalisation = kernel quasi ml_iso *ml_aniso
 
 lattice_group = None
   .type = space_group
+
+chiral = True
+  .type = bool
+  .help = "If chiral=True, only screw axis absences will be tested, and one of"
+          "the 65 MX space groups chosen. If false, glide-plane absences are"
+          "also tested, and any of the 230 space groups may be chosen."
 
 seed = 230
   .type = int(value_min=0)
@@ -361,7 +367,7 @@ Using space group I 2 3, space group I 21 3 is equally likely.\n"""
 analysis, due to lattice centering.
 Using space group I 2 2 2, space group I 21 21 21 is equally likely.\n"""
                 )
-        elif laue_group not in laue_groups_for_absence_analysis:
+        elif laue_group not in laue_groups_for_absence_analysis(params.chiral):
             logger.info("No absences to check for this laue group\n")
         else:
             if not refls_for_sym:
@@ -394,6 +400,7 @@ Using space group I 2 2 2, space group I 21 21 21 is equally likely.\n"""
             run_systematic_absences_checks(
                 experiments,
                 merged_reflections,
+                params.chiral,
                 float(params.systematic_absences.significance_level),
             )
 

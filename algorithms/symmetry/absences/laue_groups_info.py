@@ -13,6 +13,8 @@ from dials.algorithms.symmetry.absences.screw_axes import (
     ScrewAxis63c,
     ScrewAxis31c,
     ScrewAxisObserver,
+    MonoCGlide,
+    CGlide,
 )
 
 
@@ -54,10 +56,44 @@ def score_space_groups(screw_axis_scores, laue_group_info):
 ### For each laue group, define allowed screw axes and how to test these to
 ### determine the space group; True, False or 'pass' (if not relevant).
 ### If relevant, list equivalent axes and enantiomorphic pairs.
-p2m = {
-    "unique_axes": [ScrewAxis21b],
-    "space_groups": [("P 2", [False]), ("P 21", [True])],
-}
+
+# CGlide = ""
+
+
+def construct_p2m(chiral=True):
+    # if Chiral, only return MX space groups
+    if chiral:
+        p2m = {  # 8 space groups
+            "unique_axes": [ScrewAxis21b],
+            "space_groups": [("P 2", [False]), ("P 21", [True])],
+        }
+    else:
+        p2m = {  # 8 space groups
+            "unique_axes": [ScrewAxis21b, CGlide],
+            "space_groups": [
+                ("P 2", [False, False]),
+                ("P 21", [True, False]),
+                ("P 2/c", [False, True]),
+                ("P 21/c", [True, True]),
+            ],
+            "equivalent_nonchiral_groups": {
+                "P 2": ["P m", "P 2/m"],
+                "P 2/c": ["P c"],
+                "P 21": ["P 21/m"],
+            },
+        }
+    return p2m
+
+
+def construct_c2m():
+    # Chiral False
+    c2m = {  # 5 space groups
+        "unique_axes": [CGlide],
+        "space_groups": [("C 2", [False]), ("C 2/c", [True])],
+        "equivalent_nonchiral_groups": {"C 2": ["C m", "C 2/m"], "C 2/c": ["C c"]},
+    }
+    return c2m
+
 
 Cmmm = {
     "unique_axes": [ScrewAxis21c],
@@ -188,7 +224,7 @@ Fm3m = {
 
 # These laue groups contain 59 space groups (discarding the equivalent defined in P222)
 # - adding P1, C2, F222, R3, R32 and F23 make 65 MX space groups.
-laue_groups = {
+"""laue_groups = {
     "P 1 2/m 1": p2m,
     "P m m m": pmmm,
     "C m m m": Cmmm,
@@ -207,7 +243,34 @@ laue_groups = {
     "P m -3 m": pm3m,
     "I m -3 m": Im3m,
     "F m -3 m": Fm3m,
-}
+}"""
+
+
+def construct_laue_groups(chiral=True):
+    laue_groups = {
+        "P 1 2/m 1": construct_p2m(chiral),
+        "P m m m": pmmm,
+        "C m m m": Cmmm,
+        # "I m m m": Immm, #space groups are special pairs due to lattice centering
+        "P 4/m": p4m,
+        "I 4/m": I4m,
+        "P 4/m m m": p4mmm,
+        "I 4/m m m": I4mmm,
+        "P 6/m": p6m,
+        "P 6/m m m": p6mmm,
+        "P -3": p3,
+        "P -3 1 m": p31m,
+        "P -3 m 1": p3m1,
+        "P m -3": pm3,
+        # "I m -3": Im3, #space groups are special pairs due to lattice centering
+        "P m -3 m": pm3m,
+        "I m -3 m": Im3m,
+        "F m -3 m": Fm3m,
+    }
+    if not chiral:
+        laue_groups["C 1 2/m 1"] = construct_c2m()
+    return laue_groups
+
 
 # special pairs due to centering - see either
 # https://strucbio.biologie.uni-konstanz.de/xdswiki/index.php/Space_group_determination
