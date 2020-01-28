@@ -173,7 +173,10 @@ class ScalerBase(Subject):
     ):
         target = target_type()
         pmg = ScalingParameterManagerGenerator(
-            self.active_scalers, target, self.params.scaling_refinery.refinement_order
+            self.active_scalers,
+            target,
+            self.params.scaling_refinery.refinement_order,
+            shared="decay",
         )
         for apm in pmg.parameter_managers():
             if not engine:

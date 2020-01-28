@@ -235,7 +235,7 @@ class ScalingSimpleLBFGS(ScalingRefinery, SimpleLBFGS):
         gi = []
         for block_id, block in enumerate(work_blocks):
             self._scaler.update_for_minimisation(self._parameters, block_id)
-            fb, gb = self._parameters.target.compute_functional_gradients(block)
+            fb, gb = self._parameters.compute_functional_gradients(block)
             f.append(fb)
             gi.append(gb)
         """task_results = easy_mp.parallel_map(
@@ -252,7 +252,7 @@ class ScalingSimpleLBFGS(ScalingRefinery, SimpleLBFGS):
         for i in range(1, len(gi)):
             g += gi[i]
 
-        restraints = self._parameters.target.compute_restraints_functional_gradients(
+        restraints = self._parameters.compute_restraints_functional_gradients(
             self._parameters
         )
 
@@ -283,7 +283,7 @@ class ScalingLstbxBuildUpMixin(ScalingRefinery):
         if objective_only:
             for block_id, block in enumerate(work_blocks):
                 self._scaler.update_for_minimisation(self._parameters, block_id)
-                residuals, weights = self._parameters.target.compute_residuals(block)
+                residuals, weights = self._parameters.compute_residuals(block)
                 self.add_residuals(residuals, weights)
         else:
             self._jacobian = None
@@ -294,7 +294,7 @@ class ScalingLstbxBuildUpMixin(ScalingRefinery):
                     residuals,
                     jacobian,
                     weights,
-                ) = self._parameters.target.compute_residuals_and_gradients(block)
+                ) = self._parameters.compute_residuals_and_gradients(block)
                 self.add_equations(residuals, jacobian, weights)
             """task_results = easy_mp.pool_map(
                 fixed_func=self._target.compute_residuals_and_gradients,
@@ -304,7 +304,7 @@ class ScalingLstbxBuildUpMixin(ScalingRefinery):
             for result in task_results:
                 self.add_equations(result[0], result[1], result[2])"""
 
-        restraints = self._parameters.target.compute_restraints_residuals_and_gradients(
+        restraints = self._parameters.compute_restraints_residuals_and_gradients(
             self._parameters
         )
         if restraints:

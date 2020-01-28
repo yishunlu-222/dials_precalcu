@@ -10,11 +10,13 @@ from dials.algorithms.scaling.active_parameter_managers import (
     multi_active_parameter_manager,
     active_parameter_manager,
     ParameterManagerGenerator,
+    shared_active_parameter_manager,
 )
 from dials.algorithms.scaling.parameter_handler import (
     scaling_active_parameter_manager,
     ScalingParameterManagerGenerator,
 )
+from dials.algorithms.scaling.target_function import ScalingTarget
 
 
 def mock_component():
@@ -109,6 +111,7 @@ def test_multi_apm():
     components_2 = {"scale": mock_component(), "decay": mock_component()}
 
     multi_apm = multi_active_parameter_manager(
+        ScalingTarget(),
         [components_1, components_2],
         [["scale", "decay"], ["scale"]],
         active_parameter_manager,
@@ -142,6 +145,52 @@ def test_multi_apm():
     assert components_1["scale"].var_cov_matrix[0, 0] == 1.0
     assert components_1["decay"].var_cov_matrix[0, 0] == 2.0
     assert components_2["scale"].var_cov_matrix[0, 0] == 3.0
+
+
+def test_shared_apm():
+    components_1 = {
+        "scale": mock_component(),
+        "decay": mock_component(),
+        "absorption": mock_component(),
+    }
+    components_2 = {"scale": mock_component(), "decay": mock_component()}
+
+    multi_apm = shared_active_parameter_manager(
+        ScalingTarget(),
+        [components_1, components_2],
+        [["scale", "decay"], ["scale", "decay"]],
+        active_parameter_manager,
+        shared="decay",
+    )
+
+    # Test correct setup of apm_list attribute.
+    for apm in multi_apm.apm_list:
+        assert isinstance(apm, active_parameter_manager)
+    assert len(multi_apm.apm_list) == 2
+    assert multi_apm.components_list == ["scale", "decay", "scale", "decay"]
+    assert multi_apm.n_active_params == 4
+    # assert multi_apm.apm_data[0] == {"start_idx": 0, "end_idx": 2}
+    # assert multi_apm.apm_data[1] == {"start_idx": 2, "end_idx": 4}
+    assert list(multi_apm.reducing_matrix.as_dense_matrix()) == [
+        1,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+    ]
+    assert multi_apm.apm_data[0]["start_idx"] == 0
+    assert multi_apm.apm_data[0]["end_idx"] == 2
+    assert multi_apm.apm_data[1]["start_idx"] == 2
+    assert multi_apm.apm_data[1]["end_idx"] == 4
+    assert list(multi_apm.apm_data[0]["apm_sel"]) == [0, 1]
+    assert list(multi_apm.apm_data[1]["apm_sel"]) == [2, 1]
 
 
 def test_ParameterManagerGenerator_concurrent():

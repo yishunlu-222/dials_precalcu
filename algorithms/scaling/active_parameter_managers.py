@@ -8,6 +8,7 @@ import logging
 from collections import OrderedDict
 
 from dials.array_family import flex
+from scitbx import sparse
 import six
 
 logger = logging.getLogger("dials")
@@ -172,7 +173,7 @@ class multi_active_parameter_manager(object):
             i += n
 
 
-class shared_active_parameter_manager(object):
+class shared_active_parameter_manager(multi_active_parameter_manager):
 
     """Class to enforce sharing of model components.
 
@@ -180,17 +181,111 @@ class shared_active_parameter_manager(object):
     reshaping of gradient/jacobian during minimisation.
     """
 
-    def __init__(self, target, multi_apm):
-        self.target = target
-        self.x = flex.double([])
-        self.multi_apm = multi_apm  # to be passed to target for calcs
-        # some way to indicate shared components?
+    def __init__(self, target, components_list, selection_lists, apm_class, shared):
+        super(shared_active_parameter_manager, self).__init__(
+            target, components_list, selection_lists, apm_class
+        )
+        n_unique_params = 0
+        found_initial_shared = False
+        # first loop over to work out how many unique parameters overall
+        for i, apm in enumerate(self.apm_list):
+            for name, comp in apm.components.items():
+                if name != shared:
+                    n_unique_params += comp["n_params"]
+                elif name == shared and not found_initial_shared:
+                    n_unique_params += comp["n_params"]
+                    found_initial_shared = True
 
-    def set_param_vals(self, x):
-        self.x = x
+        self.reducing_matrix = sparse.matrix(self.n_active_params, n_unique_params)
+        # now loop through to work out reducing matrix
+        found_initial_shared = False
+        shared_column = 0
+        cumul_params = 0
+        unique_parameters = []
+        for i, apm in enumerate(self.apm_list):
+            for name, comp in apm.components.items():
+                start_col_idx = cumul_params
+                indiv_start = self.apm_data[i]["start_idx"] + comp["start_idx"]
+                indiv_end = self.apm_data[i]["start_idx"] + comp["end_idx"]
+                if name != shared:
+                    for n, j in enumerate(range(indiv_start, indiv_end)):
+                        self.reducing_matrix[j, start_col_idx + n] = 1
+                        unique_parameters.append(j)
+                elif name == shared and not found_initial_shared:
+                    for n, j in enumerate(range(indiv_start, indiv_end)):
+                        self.reducing_matrix[j, start_col_idx + n] = 1
+                        unique_parameters.append(j)
+                    shared_start_column = start_col_idx
+                    found_initial_shared = True
+                    shared_params = (indiv_start, indiv_end)
+                else:  # name == shared and n_shared_found > 0:
+                    for n, j in enumerate(range(indiv_start, indiv_end)):
+                        self.reducing_matrix[j, shared_start_column + n] = 1
+                cumul_params += comp["n_params"]
+            # cumul_params += self.apm_list[i].n_active_params
+        # so now know how everything is joined with the matrix.
 
-    def get_param_vals(self):
-        return self.x
+        # now need to update apm_data
+        n_cumul = 0
+        found_initial_shared = False
+        for i, apm in enumerate(self.apm_list):
+            apm_sel = flex.size_t()
+            # ^ needs to be size_t to make sure selected in correct order
+            for k, (name, comp) in enumerate(apm.components.items()):
+                if name != shared:
+                    start = n_cumul
+                    end = n_cumul + comp["n_params"]
+                    apm_sel.extend(flex.size_t(range(start, end)))
+                    # apm_sel.set_selected(flex.size_t(range(start, end)), True)
+                    n_cumul += comp["n_params"]
+                elif name == shared and not found_initial_shared:
+                    start = n_cumul
+                    end = n_cumul + comp["n_params"]
+                    # apm_sel.set_selected(flex.size_t(range(start, end)), True)
+                    apm_sel.extend(flex.size_t(range(start, end)))
+                    n_cumul += comp["n_params"]
+                    found_initial_shared = True
+                else:
+                    apm_sel.extend(
+                        flex.size_t(range(shared_params[0], shared_params[1]))
+                    )
+                    # apm_sel.set_selected(flex.size_t(range(shared_params[0], shared_params[1])), True)
+            self.apm_data[i]["apm_sel"] = apm_sel
+        # also need to reduce self.x
+        self.x = self.x.select(flex.size_t(unique_parameters))
+
+    def select_parameters(self, apm_number):
+        """Select the subset of self.x corresponding to the apm number."""
+        apm_data = self.apm_data[apm_number]
+        sel = apm_data["apm_sel"]
+        return self.x.select(sel)
+
+    def compute_functional_gradients(self, block):
+        f, g = self.target.compute_functional_gradients(block)
+        return f, g * self.reducing_matrix
+
+    def compute_restraints_functional_gradients(self, block):
+        res = self.target.compute_restraints_functional_gradients(block)
+        if res is not None:
+            return res[0], res[1] * self.reducing_matrix
+        return res
+
+    def compute_residuals_and_gradients(self, block):
+        r, j, w = self.target.compute_residuals_and_gradients(block)
+        return r, j * self.reducing_matrix, w  # * self.reducing_matrix
+
+    def compute_restraints_residuals_and_gradients(self, block):
+        res = self.target.compute_restraints_residuals_and_gradients(block)
+        if res is not None:
+            return (
+                res[0],
+                res[1] * self.reducing_matrix,
+                res[2],
+            )  # * self.reducing_matrix
+        return res
+
+    def compute_residuals(self, block):
+        return self.target.compute_residuals(block)
 
 
 class ParameterManagerGenerator(object):
@@ -203,7 +298,7 @@ class ParameterManagerGenerator(object):
     on the data_manager.consecutive_refinement_order property).
     """
 
-    def __init__(self, data_managers, apm_type, target, mode="concurrent"):
+    def __init__(self, data_managers, apm_type, target, mode="concurrent", shared=None):
         if mode not in ["concurrent", "consecutive"]:
             raise ValueError(
                 "Bad value for refinement order mode: %s, expected %s"
@@ -213,6 +308,7 @@ class ParameterManagerGenerator(object):
         self.data_managers = data_managers
         self.apm_type = apm_type
         self.mode = mode
+        self.shared = shared
         self.param_lists = [None] * len(data_managers)
         if self.mode == "concurrent":
             for i, data_manager in enumerate(self.data_managers):
@@ -240,6 +336,16 @@ class ParameterManagerGenerator(object):
 
     def _parameter_managers_concurrent(self):
         components = [s.components for s in self.data_managers]
+        if self.shared:
+            return [
+                shared_active_parameter_manager(
+                    self.target,
+                    components,
+                    self.param_lists,
+                    self.apm_type,
+                    self.shared,
+                )
+            ]
         return [
             multi_active_parameter_manager(
                 self.target, components, self.param_lists, self.apm_type
@@ -255,6 +361,11 @@ class ParameterManagerGenerator(object):
                     params.append(param_list.pop(0))
                 else:
                     params.append([])
-            yield multi_active_parameter_manager(
-                self.target, components, params, self.apm_type
-            )
+            if self.shared:
+                yield multi_active_parameter_manager(
+                    self.target, components, params, self.apm_type, self.shared
+                )
+            else:
+                yield multi_active_parameter_manager(
+                    self.target, components, params, self.apm_type
+                )

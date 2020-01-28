@@ -49,7 +49,7 @@ class ScalingParameterManagerGenerator(ParameterManagerGenerator):
 
     """Class to generate parameter manager for scaling."""
 
-    def __init__(self, data_managers, target, mode):
+    def __init__(self, data_managers, target, mode, shared=None):
         super(ScalingParameterManagerGenerator, self).__init__(
-            data_managers, scaling_active_parameter_manager, target, mode
+            data_managers, scaling_active_parameter_manager, target, mode, shared
         )
