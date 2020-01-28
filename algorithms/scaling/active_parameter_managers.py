@@ -94,7 +94,24 @@ class active_parameter_manager(object):
             component["object"].free_parameter_esds = esds[start_idx:end_idx]
 
 
-class multi_active_parameter_manager(object):
+class TargetInterface(object):
+    def compute_functional_gradients(self, block):
+        return self.target.compute_functional_gradients(block)
+
+    def compute_restraints_functional_gradients(self, block):
+        return self.target.compute_restraints_functional_gradients(block)
+
+    def compute_residuals_and_gradients(self, block):
+        return self.target.compute_residuals_and_gradients(block)
+
+    def compute_restraints_residuals_and_gradients(self, block):
+        return self.target.compute_restraints_residuals_and_gradients(block)
+
+    def compute_residuals(self, block):
+        return self.target.compute_residuals(block)
+
+
+class multi_active_parameter_manager(TargetInterface):
     """
     Parameter manager to manage the current active parameters during minimisation
     for multiple datasets that are being minimised simultaneously.
@@ -202,15 +219,16 @@ class shared_active_parameter_manager(multi_active_parameter_manager):
         shared_params = (0, 0)
         cumul_params = 0
         unique_parameters = []
-        for apm, apm_data in zip(self.apm_list, self.apm_data):
+        for i, apm in enumerate(self.apm_list):
             for name, comp in apm.components.items():
                 start_col_idx = cumul_params
-                indiv_start = apm_data["start_idx"] + comp["start_idx"]
-                indiv_end = apm_data["start_idx"] + comp["end_idx"]
+                indiv_start = self.apm_data[i]["start_idx"] + comp["start_idx"]
+                indiv_end = self.apm_data[i]["start_idx"] + comp["end_idx"]
                 if name != shared:
                     for n, j in enumerate(range(indiv_start, indiv_end)):
                         self.reducing_matrix[j, start_col_idx + n] = 1
                         unique_parameters.append(j)
+                    cumul_params += comp["n_params"]  #
                 elif name == shared and not found_initial_shared:
                     for n, j in enumerate(range(indiv_start, indiv_end)):
                         self.reducing_matrix[j, start_col_idx + n] = 1
@@ -218,17 +236,18 @@ class shared_active_parameter_manager(multi_active_parameter_manager):
                     shared_start_column = start_col_idx
                     found_initial_shared = True
                     shared_params = (indiv_start, indiv_end)
+                    cumul_params += comp["n_params"]
                 else:  # name == shared and n_shared_found > 0:
+                    assert (
+                        shared_params[1] - shared_params[0] == indiv_end - indiv_start
+                    )
                     for n, j in enumerate(range(indiv_start, indiv_end)):
                         self.reducing_matrix[j, shared_start_column + n] = 1
-                cumul_params += comp["n_params"]
-            # cumul_params += self.apm_list[i].n_active_params
-        # so now know how everything is joined with the matrix.
 
         # now need to update apm_data
         n_cumul = 0
         found_initial_shared = False
-        for apm, apm_data in zip(self.apm_list, self.apm_data):
+        for i, apm in enumerate(self.apm_list):
             apm_sel = flex.size_t()
             # ^ needs to be size_t to make sure selected in correct order
             for name, comp in apm.components.items():
@@ -247,7 +266,7 @@ class shared_active_parameter_manager(multi_active_parameter_manager):
                     apm_sel.extend(
                         flex.size_t(range(shared_params[0], shared_params[1]))
                     )
-            apm_data["apm_sel"] = apm_sel
+            self.apm_data[i]["apm_sel"] = apm_sel
 
         # also need to reduce self.x to the size of the new params
         self.x = self.x.select(flex.size_t(unique_parameters))
@@ -278,23 +297,20 @@ class shared_active_parameter_manager(multi_active_parameter_manager):
             return res[0], res[1] * self.reducing_matrix, res[2]
         return res
 
-    def compute_residuals(self, block):
-        return self.target.compute_residuals(block)
-
     def set_param_esds(self, esds):
         """Set the estimated standard deviations of the parameters."""
-        for apm, apm_data in zip(self.apm_list, self.apm_data):
+        for apm, apm_data in zip(self.apm_list, self.apm_data.values()):
             apm.set_param_esds(esds.select(apm_data["apm_sel"]))
 
     def calculate_model_state_uncertainties(self, var_cov):
         """Set var_cov matrices for each component, to allow later calculation
         of errors."""
-        for apm, apm_data in zip(self.apm_list, self.apm_data):
+        for i, apm in enumerate(self.apm_list):
             sub_var_cov = sparse.matrix(apm.n_active_params, apm.n_active_params)
             n_this = 0
             for comp in apm.components.values():
                 n = comp["n_params"]
-                start_idx = apm_data["apm_sel"][n_this]
+                start_idx = self.apm_data[i]["apm_sel"][n_this]
                 sub = var_cov.matrix_copy_block(start_idx, start_idx, n, n)
                 sub_var_cov.assign_block(sub, n_this, n_this)
                 n_this += n

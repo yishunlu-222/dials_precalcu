@@ -133,9 +133,7 @@ def print_step_table(refinery):
     logger.info("\nRefinement steps:")
 
     header = ["Step", "Nref"]
-    for (name, units) in zip(
-        refinery._parameters.target.rmsd_names, refinery._parameters.target.rmsd_units
-    ):
+    for (name, units) in zip(refinery._target.rmsd_names, refinery._target.rmsd_units):
         header.append(name + "\n(" + units + ")")
 
     rows = []
@@ -205,8 +203,7 @@ class ScalingRefinery(object):
         self.history.add_row()
         self.history.set_last_cell("num_reflections", self._scaler.Ih_table.size)
         self.history.set_last_cell(
-            "rmsd",
-            self._parameters.target.rmsds(self._scaler.Ih_table, self._parameters),
+            "rmsd", self._target.rmsds(self._scaler.Ih_table, self._parameters)
         )
         self.history.set_last_cell(
             "parameter_vector", self._parameters.get_param_vals()

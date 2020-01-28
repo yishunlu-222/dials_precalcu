@@ -203,7 +203,10 @@ def test_ParameterManagerGenerator_concurrent():
     data_manager = mock_data_manager(components_1)
 
     pmg = ParameterManagerGenerator(
-        [data_manager], apm_type=active_parameter_manager, mode="concurrent"
+        [data_manager],
+        apm_type=active_parameter_manager,
+        target=ScalingTarget(),
+        mode="concurrent",
     )
     apms = pmg.parameter_managers()
     assert len(apms) == 1
@@ -225,6 +228,7 @@ def test_ParameterManagerGenerator_concurrent():
     pmg = ParameterManagerGenerator(
         [data_manager_1, data_manager_2],
         apm_type=active_parameter_manager,
+        target=ScalingTarget(),
         mode="concurrent",
     )
     multi_apms = pmg.parameter_managers()
@@ -253,7 +257,10 @@ def test_ParameterManagerGenerator_consecutive():
 
     # Test single dataset case.
     pmg = ParameterManagerGenerator(
-        [data_manager], apm_type=active_parameter_manager, mode="consecutive"
+        [data_manager],
+        apm_type=active_parameter_manager,
+        target=ScalingTarget(),
+        mode="consecutive",
     )
     apms = list(pmg.parameter_managers())
     assert len(apms) == 2
@@ -276,6 +283,7 @@ def test_ParameterManagerGenerator_consecutive():
     pmg = ParameterManagerGenerator(
         [data_manager, data_manager_2],
         apm_type=active_parameter_manager,
+        target=ScalingTarget(),
         mode="consecutive",
     )
     apms = list(pmg.parameter_managers())
@@ -322,7 +330,7 @@ def test_ParameterManagerGenerator_consecutive():
 def test_scaling_active_parameter_manager():
     """Test the scaling-specific parameter manager."""
     components_2 = {"1": mock_scaling_component(2), "2": mock_scaling_component(2)}
-    scaling_apm = scaling_active_parameter_manager(components_2, ["1"])
+    scaling_apm = scaling_active_parameter_manager(ScalingTarget(), components_2, ["1"])
     assert list(scaling_apm.constant_g_values[0]) == list(
         components_2["2"].calculate_scales()
     )
@@ -330,18 +338,26 @@ def test_scaling_active_parameter_manager():
     assert scaling_apm.n_obs == [2]
 
     # Test that no constant_g_values if both components selected
-    scaling_apm = scaling_active_parameter_manager(components_2, ["1", "2"])
+    scaling_apm = scaling_active_parameter_manager(
+        ScalingTarget(), components_2, ["1", "2"]
+    )
     assert scaling_apm.constant_g_values is None
 
     # Check that one can't initialise with an unequal number of reflections,
     # either within the selection or overall.
     with pytest.raises(AssertionError):
         components_2 = {"1": mock_scaling_component(2), "2": mock_scaling_component(1)}
-        scaling_apm = scaling_active_parameter_manager(components_2, ["1", "2"])
+        scaling_apm = scaling_active_parameter_manager(
+            ScalingTarget(), components_2, ["1", "2"]
+        )
     with pytest.raises(AssertionError):
         components_2 = {"1": mock_scaling_component(2), "2": mock_scaling_component(1)}
-        scaling_apm = scaling_active_parameter_manager(components_2, ["1"])
+        scaling_apm = scaling_active_parameter_manager(
+            ScalingTarget(), components_2, ["1"]
+        )
 
     data_manager = mock_data_manager(components_2)
-    pmg = ScalingParameterManagerGenerator([data_manager], mode="concurrent")
+    pmg = ScalingParameterManagerGenerator(
+        ScalingTarget(), [data_manager], mode="concurrent"
+    )
     assert isinstance(pmg.apm_type, type(scaling_active_parameter_manager))

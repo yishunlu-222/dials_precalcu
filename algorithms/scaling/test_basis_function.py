@@ -10,6 +10,7 @@ from dials.algorithms.scaling.model.components.scale_components import (
 )
 from dials.algorithms.scaling.basis_functions import RefinerCalculator
 from dials.algorithms.scaling.parameter_handler import scaling_active_parameter_manager
+from dials.algorithms.scaling.target_function import ScalingTarget
 
 
 @pytest.fixture
@@ -45,7 +46,9 @@ def test_RefinerCalculator(small_reflection_table):
     for component in components.values():
         component.update_reflection_data()  # Add some data to components.
 
-    apm = scaling_active_parameter_manager(components, ["decay", "scale"])
+    apm = scaling_active_parameter_manager(
+        ScalingTarget(), components, ["decay", "scale"]
+    )
 
     # First test that scale factors can be successfully updated.
     # Manually change the parameters in the apm.
@@ -82,7 +85,7 @@ def test_RefinerCalculator(small_reflection_table):
     components["abs"].calculate_scales_and_derivatives()
 
     # Now generate a parameter manager for a single component.
-    apm = scaling_active_parameter_manager(components, ["scale"])
+    apm = scaling_active_parameter_manager(ScalingTarget(), components, ["scale"])
     new_S = 2.0
     apm.set_param_vals(flex.double(components["scale"].n_params, new_S))
     s, d = RefinerCalculator.calculate_scales_and_derivatives(apm, 0)
@@ -101,10 +104,12 @@ def test_RefinerCalculator(small_reflection_table):
     components["scale"].calculate_scales_and_derivatives()
     components["abs"].calculate_scales_and_derivatives()
 
-    apm = scaling_active_parameter_manager(components, ["scale", "decay"])
+    apm = scaling_active_parameter_manager(
+        ScalingTarget(), components, ["scale", "decay"]
+    )
     _, __ = RefinerCalculator.calculate_scales_and_derivatives(apm, 0)
 
     # Test for no components
-    apm = scaling_active_parameter_manager(components, [])
+    apm = scaling_active_parameter_manager(ScalingTarget(), components, [])
     _, d = RefinerCalculator.calculate_scales_and_derivatives(apm, 0)
     assert d.n_cols == 0 and d.n_rows == 0
