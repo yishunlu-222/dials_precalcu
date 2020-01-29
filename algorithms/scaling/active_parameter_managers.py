@@ -27,8 +27,8 @@ class active_parameter_manager(object):
     component.
     """
 
-    def __init__(self, target, components, selection_list):
-        self.target = target
+    def __init__(self, components, selection_list):
+        # self.target = target
         self.x = flex.double([])
         self.components = OrderedDict()
         self.derivatives = None
@@ -137,7 +137,7 @@ class multi_active_parameter_manager(TargetInterface):
         for j, (components, selection_list) in enumerate(
             zip(components_list, selection_lists)
         ):
-            self.apm_list.append(apm_class(target, components, selection_list))
+            self.apm_list.append(apm_class(components, selection_list))
             if not all_same_components:
                 logger.info(
                     "Components to be refined in this cycle for dataset %s: %s",
@@ -215,21 +215,34 @@ class shared_active_parameter_manager(multi_active_parameter_manager):
 
         self.reducing_matrix = sparse.matrix(self.n_active_params, n_unique_params)
         # now loop through to work out reducing matrix
+        # also need to update apm_data with a size_t selection
         found_initial_shared = False
         shared_params = (0, 0)
         cumul_params = 0
         unique_parameters = []
         for i, apm in enumerate(self.apm_list):
+            apm_sel = flex.size_t()
+            # ^ needs to be size_t to make sure selected in correct order
             for name, comp in apm.components.items():
                 start_col_idx = cumul_params
                 indiv_start = self.apm_data[i]["start_idx"] + comp["start_idx"]
                 indiv_end = self.apm_data[i]["start_idx"] + comp["end_idx"]
                 if name != shared:
+                    apm_sel.extend(
+                        flex.size_t(
+                            range(cumul_params, cumul_params + comp["n_params"])
+                        )
+                    )
                     for n, j in enumerate(range(indiv_start, indiv_end)):
                         self.reducing_matrix[j, start_col_idx + n] = 1
                         unique_parameters.append(j)
                     cumul_params += comp["n_params"]  #
                 elif name == shared and not found_initial_shared:
+                    apm_sel.extend(
+                        flex.size_t(
+                            range(cumul_params, cumul_params + comp["n_params"])
+                        )
+                    )
                     for n, j in enumerate(range(indiv_start, indiv_end)):
                         self.reducing_matrix[j, start_col_idx + n] = 1
                         unique_parameters.append(j)
@@ -241,31 +254,11 @@ class shared_active_parameter_manager(multi_active_parameter_manager):
                     assert (
                         shared_params[1] - shared_params[0] == indiv_end - indiv_start
                     )
-                    for n, j in enumerate(range(indiv_start, indiv_end)):
-                        self.reducing_matrix[j, shared_start_column + n] = 1
-
-        # now need to update apm_data
-        n_cumul = 0
-        found_initial_shared = False
-        for i, apm in enumerate(self.apm_list):
-            apm_sel = flex.size_t()
-            # ^ needs to be size_t to make sure selected in correct order
-            for name, comp in apm.components.items():
-                if name != shared:
-                    start = n_cumul
-                    end = n_cumul + comp["n_params"]
-                    apm_sel.extend(flex.size_t(range(start, end)))
-                    n_cumul += comp["n_params"]
-                elif name == shared and not found_initial_shared:
-                    start = n_cumul
-                    end = n_cumul + comp["n_params"]
-                    apm_sel.extend(flex.size_t(range(start, end)))
-                    n_cumul += comp["n_params"]
-                    found_initial_shared = True
-                else:
                     apm_sel.extend(
                         flex.size_t(range(shared_params[0], shared_params[1]))
                     )
+                    for n, j in enumerate(range(indiv_start, indiv_end)):
+                        self.reducing_matrix[j, shared_start_column + n] = 1
             self.apm_data[i]["apm_sel"] = apm_sel
 
         # also need to reduce self.x to the size of the new params
@@ -391,7 +384,7 @@ class ParameterManagerGenerator(object):
                 else:
                     params.append([])
             if self.shared:
-                yield multi_active_parameter_manager(
+                yield shared_active_parameter_manager(
                     self.target, components, params, self.apm_type, self.shared
                 )
             else:
