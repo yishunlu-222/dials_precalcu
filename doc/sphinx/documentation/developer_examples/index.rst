@@ -10,3 +10,4 @@ Developer Examples
 
    extending_dials
    read_experiment_and_data
+   handling_multiple_datasets
