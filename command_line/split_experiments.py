@@ -158,11 +158,9 @@ class Script(object):
 
             wavelengths = match_wavelengths(experiments)
             for i, wl in enumerate(sorted(wavelengths.keys())):
-                expids = []
                 new_exps = ExperimentList()
                 exp_nos = wavelengths[wl]
                 for j in exp_nos:
-                    expids.append(experiments[j].identifier)  # string
                     new_exps.append(experiments[j])
 
                 experiment_filename = experiments_template(index=i)
@@ -172,7 +170,7 @@ class Script(object):
                 )
                 new_exps.as_json(experiment_filename)
                 if reflections:
-                    refls = reflections.select_on_experiment_identifiers(expids)
+                    refls = reflections.select(new_exps)
                     reflections_filename = reflections_template(index=i)
                     print(
                         "Saving reflections with wavelength %s to %s"

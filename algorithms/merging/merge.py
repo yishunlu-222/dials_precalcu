@@ -103,12 +103,10 @@ def make_MAD_merged_mtz_file(params, experiments, reflections, wavelengths):
         cnames = params.output.crystal_names
 
     for dname, cname, (wavelength, exp_nos) in zip(dnames, cnames, wavelengths.items()):
-        expids = []
         new_exps = ExperimentList()
         for i in exp_nos:
-            expids.append(experiments[i].identifier)  # string
             new_exps.append(experiments[i])
-        refls = reflections[0].select_on_experiment_identifiers(expids)
+        refls = reflections[0].select(new_exps)
 
         logger.info("Running merge for wavelength: %s", wavelength)
         merged, anom, amplitudes, anom_amp = merge_and_truncate(

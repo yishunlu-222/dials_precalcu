@@ -39,3 +39,18 @@ def split_reflection_tables():
     for i, table in enumerate(split_tables_2):
         assert list(table["id"]) == [i]
         assert dict(table.experiment_identifiers()) == {i: str(i)}
+
+
+def handling_missing_data():
+    ###First make an ExperimentList and a multi-dataset reflection table
+    experiments = ExperimentList()
+    for i in range(4):
+        experiments.append(Experiment(identifier=str(i)))
+    reflection_table = flex.reflection_table()
+    reflection_table["id"] = flex.int([0, 2])
+    reflection_table.experiment_identifiers()[0] = "0"
+    reflection_table.experiment_identifiers()[1] = "1"
+    reflection_table.experiment_identifiers()[2] = "2"
+
+    for exp in experiments:
+        _ = reflection_table.select(exp)

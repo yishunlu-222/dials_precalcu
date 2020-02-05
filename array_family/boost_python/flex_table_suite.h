@@ -734,8 +734,9 @@ namespace dials { namespace af { namespace boost_python { namespace flex_table_s
         }
       }
       af::const_ref<std::size_t> idx = sel.const_ref();
-
-      result = select_rows_index(self, idx);
+      if (idx.size() > 0){
+        result = select_rows_index(self, idx);
+      }
     }
 
     return result;
