@@ -145,15 +145,18 @@ def index(experiments, reflections, params):
 
     if len(reflections) == 0:
         raise ValueError("No reflection lists found in input")
-    elif len(reflections) == 1:
-        if "imageset_id" not in reflections[0]:
-            reflections[0]["imageset_id"] = reflections[0]["id"]
+    # elif len(reflections) == 1:
+    #    if "imageset_id" not in reflections[0]:
+    #        reflections[0]["imageset_id"] = reflections[0]["id"]
     elif len(reflections) > 1:
-        assert len(reflections) == len(experiments)
+        # combine multiple datasets into a single table.
+        for r_t in reflections[1:]:
+            reflections[0].extend(r_t)
+        """assert len(reflections) == len(experiments)
         for i in range(len(reflections)):
             reflections[i]["imageset_id"] = flex.int(len(reflections[i]), i)
             if i > 0:
-                reflections[0].extend(reflections[i])
+                reflections[0].extend(reflections[i])"""
     reflections = reflections[0]
 
     if params.indexing.image_range:
