@@ -200,15 +200,41 @@ def create_auto_scaling_model(params, experiments, reflections):
 
     Assumes that only called when model parameter not specified by user."""
     models = experiments.scaling_models()
+    phil_scope = phil.parse(
+        """
+    include scope dials.command_line.scale.phil_scope
+    """,
+        process_includes=True,
+    )
+    optionparser = OptionParser(phil=phil_scope, check_format=False)
+    default_params, _ = optionparser.parse_args(args=[], quick_parse=True)
+    from dials.algorithms.scaling.model.model import model_phil_scope
+
+    modified_phil = phil_scope.format(python_object=params)
+    # modified_phil.show()
+    phil_diff = phil_scope.fetch_diff(source=modified_phil)
+
+    print("in auto scaling model")
+
     if None in models or params.overwrite_existing_models:
-        phil_scope = phil.parse(
-            """
-        include scope dials.command_line.scale.phil_scope
-        """,
-            process_includes=True,
-        )
-        optionparser = OptionParser(phil=phil_scope, check_format=False)
-        default_params, _ = optionparser.parse_args(args=[], quick_parse=True)
+        """print(phil_diff.as_str())
+        print(dir(phil_diff))
+        for o in phil_diff.objects:
+            print(o)
+            print(o.as_str())
+            print(dir(o))
+            for obj in o.objects:
+                print(obj.as_str())
+                print(o.name)
+                print(obj.name)
+                print(dir(obj))
+        optionparser = OptionParser(phil=phil_diff, check_format=False)
+        diff_params, _ = optionparser.parse_args(args=[], quick_parse=True)
+        print(dir(diff_params))
+        print(params.physical.lmax)
+        print('here2')
+        assert 0"""
+
         for exp, refl in zip(experiments, reflections):
             model = exp.scaling_model
             if not model or params.overwrite_existing_models:
@@ -258,6 +284,29 @@ def create_auto_scaling_model(params, experiments, reflections):
                         model_class = entry_point.load()
                         break
                 exp.scaling_model = model_class.from_data(params, exp, refl)
+
+    print(phil_diff.as_str())
+    if phil_diff.objects:
+        print(
+            """
+        Existing scaling models loaded, but user options provided also.
+        Loaded models will be updated to take account of this"""
+        )
+        print(phil_diff.as_str())
+        # find model, if model same as an existing model, use to update
+        for obj in phil_diff.objects:
+            optionparser = OptionParser(phil=phil_diff, check_format=False)
+            diff_params, _ = optionparser.parse_args(args=[], quick_parse=True)
+            for model in models:
+                if model.id_ == obj.name:
+                    print(obj.name)
+                    model.update_from_params(diff_params)
+
+    # or if no diff phil, but different to model phil params
+    # print(models[0].params)
+    # if params.physical != models[0].params:
+    #    print('here')
+    assert 0
     return experiments
 
 
@@ -278,6 +327,7 @@ def create_scaling_model(params, experiments, reflection_tables):
             model = expt.scaling_model
             if not model or params.overwrite_existing_models:
                 expt.scaling_model = model_class.from_data(params, expt, refl)
+    # also check if
     return experiments
 
 

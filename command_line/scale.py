@@ -212,6 +212,7 @@ def run(args=None, phil=phil_scope):  # type: (List[str], phil.scope) -> None
         epilog=__doc__,
     )
     params, options = parser.parse_args(args=args, show_diff_phil=False)
+    print(args)
 
     if not params.input.experiments or not params.input.reflections:
         parser.print_help()

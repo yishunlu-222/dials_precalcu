@@ -440,6 +440,18 @@ class PhysicalScalingModel(ScalingModelBase):
         self._configdict["valid_osc_range"] = (new_osc_range_0, new_osc_range_1)
         self.set_valid_image_range(new_image_range)
 
+    def update_from_params(self, params):
+        """Update an existing model with updated options."""
+        try:
+            abscor = params.physical.absorption_correction
+
+        except AttributeError:
+            pass
+
+        if params.physical.lmax != 4:
+            print(params.physical.lmax)
+        assert 0
+
     @classmethod
     def from_data(cls, params, experiment, reflection_table):
         """Create the scaling model defined by the params."""
