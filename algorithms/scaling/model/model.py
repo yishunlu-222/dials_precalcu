@@ -59,13 +59,17 @@ scale_interval = 2.0
     .help = "Rotation (phi) interval between model parameters for the scale"
             "component."
     .expert_level = 1
+relative_B_correction = True
+    .type = bool
+    .help = "Option to turn off relative B correction."
+    .expert_level = 1
 decay_correction = True
     .type = bool
     .help = "Option to turn off decay correction."
     .expert_level = 1
-absorption_correction = True
+absorption_correction = False
     .type = bool
-    .help = "Option to turn off absorption correction."
+    .help = "Option to turn on spherical harmonic absorption correction."
     .expert_level = 1
 lmax = 4
     .type = int(value_min=2)
@@ -378,6 +382,11 @@ class DoseDecay(ScalingModelBase):
             self._components["decay"] = LinearDoseDecay(
                 decay_setup["parameters"], decay_setup["parameter_esds"]
             )
+        if "relative_B" in configdict["corrections"]:
+            B_setup = parameters_dict["relative_B"]
+            self._components["relative_B"] = SingleBScaleFactor(
+                B_setup["parameters"], B_setup["parameter_esds"]
+            )
         if "absorption" in configdict["corrections"]:
             absorption_setup = parameters_dict["absorption"]
             self._components["absorption"] = SHScaleComponent(
@@ -387,7 +396,7 @@ class DoseDecay(ScalingModelBase):
     @property
     def consecutive_refinement_order(self):
         """:obj:`list`: a nested list of component names to indicate scaling order."""
-        return [["scale", "decay"], ["absorption"]]
+        return [["scale", "relative_B", "decay"], ["absorption"]]
 
     def fix_initial_parameter(self, params):
         if "scale" in self.components and params.dose_decay.fix_initial:
@@ -402,6 +411,8 @@ class DoseDecay(ScalingModelBase):
             self.components["scale"].data = {"x": norm}
         if "decay" in self.components:
             self.components["decay"].data = {"x": phi, "d": reflection_table["d"]}
+        if "relative_B" in self.components:
+            self.components["relative_B"].data = {"d": reflection_table["d"]}
         if "absorption" in self.components:
             _add_absorption_component_to_physically_derived_model(
                 self, reflection_table
@@ -478,10 +489,17 @@ class DoseDecay(ScalingModelBase):
             "parameter_esds": None,
         }
 
+        if params.relative_B_correction:
+            configdict["corrections"].append("relative_B")
+            parameters_dict["relative_B"] = {
+                "parameters": flex.double(1, 0.0),
+                "parameter_esds": None,
+            }
+
         if params.decay_correction:
             configdict["corrections"].append("decay")
             parameters_dict["decay"] = {
-                "parameters": flex.double(2, 0.0),
+                "parameters": flex.double(1, 0.0),
                 "parameter_esds": None,
             }
 
@@ -512,6 +530,10 @@ class DoseDecay(ScalingModelBase):
             s_params = flex.double(obj["scale"]["parameters"])
             if "est_standard_devs" in obj["scale"]:
                 s_params_sds = flex.double(obj["scale"]["est_standard_devs"])
+        if "relative_B" in configdict["corrections"]:
+            B = flex.double(obj["relative_B"]["parameters"])
+            if "est_standard_devs" in obj["relative_B"]:
+                B_sd = flex.double(obj["relative_B"]["est_standard_devs"])
         if "decay" in configdict["corrections"]:
             d_params = flex.double(obj["decay"]["parameters"])
             if "est_standard_devs" in obj["decay"]:
@@ -524,6 +546,7 @@ class DoseDecay(ScalingModelBase):
         parameters_dict = {
             "scale": {"parameters": s_params, "parameter_esds": s_params_sds},
             "decay": {"parameters": d_params, "parameter_esds": d_params_sds},
+            "relative_B": {"parameters": B, "parameter_esds": B_sd},
             "absorption": {"parameters": abs_params, "parameter_esds": a_params_sds},
         }
 
