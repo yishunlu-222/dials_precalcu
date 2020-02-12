@@ -262,7 +262,7 @@ class SingleBScaleFactor(ScaleComponentBase):
     @ScaleComponentBase.data.setter
     def data(self, data):
         """Set the data dict in the parent class."""
-        assert set(data.keys()) == {"id", "d"}, set(data.keys())
+        assert set(data.keys()) == {"d"}, set(data.keys())
         self._data = data
 
     def update_reflection_data(self, selection=None, block_selections=None):
@@ -372,25 +372,20 @@ class LinearDoseDecay(ScaleComponentBase):
 
     def calculate_scales_and_derivatives(self, block_id=0):
         """Calculate and return inverse scales and derivatives for a given block."""
-        d_squared = self._d_values[block_id] * self._d_values[block_id]
         scales = flex.exp(
-            (self._parameters[0] / (2.0 * d_squared))
-            + (self._parameters[1] * self._x[block_id] / self._d_values[block_id])
+            self._parameters[0] * self._x[block_id] / self._d_values[block_id]
         )
-        derivatives = sparse.matrix(self._n_refl[block_id], 2)
+        derivatives = sparse.matrix(self._n_refl[block_id], 1)
         for i in range(self._n_refl[block_id]):
-            derivatives[i, 0] = scales[i] / (2.0 * d_squared[i])
-            derivatives[i, 1] = scales[i] * (
+            derivatives[i, 0] = scales[i] * (
                 self._x[block_id][i] / self._d_values[block_id][i]
             )
         return scales, derivatives
 
     def calculate_scales(self, block_id=0):
         """Calculate and return inverse scales for a given block."""
-        d_squared = self._d_values[block_id] * self._d_values[block_id]
         scales = flex.exp(
-            (self._parameters[0] / (2.0 * d_squared))
-            + (self._parameters[1] * self._x[block_id] / self._d_values[block_id])
+            self._parameters[0] * self._x[block_id] / self._d_values[block_id]
         )
         return scales
 
