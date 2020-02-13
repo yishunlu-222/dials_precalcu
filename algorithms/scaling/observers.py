@@ -17,7 +17,10 @@ from dials.algorithms.scaling.plots import (
     error_model_variance_plot,
     error_regression_plot,
 )
-from dials.algorithms.scaling.model.model import plot_scaling_models
+from dials.algorithms.scaling.model.model import (
+    plot_scaling_models,
+    make_combined_plots,
+)
 from dials.report.analysis import (
     reflection_tables_to_batch_dependent_properties,
     make_merging_statistics_summary,
@@ -243,6 +246,9 @@ class ScalingModelObserver(Observer):
                 plot["layout"]["title"] += " (dataset %s)" % key
             for name, plot in six.iteritems(scaling_model_plots):
                 d[name + "_" + str(key)] = plot
+        combined_plots = make_combined_plots(self.data)
+        if combined_plots:
+            d.update(combined_plots)
         graphs = {"scaling_model": d}
         return graphs
 

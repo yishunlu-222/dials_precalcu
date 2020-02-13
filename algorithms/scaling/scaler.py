@@ -176,7 +176,7 @@ class ScalerBase(Subject):
             self.active_scalers,
             target,
             self.params.scaling_refinery.refinement_order,
-            # shared="decay",
+            shared="decay",
         )
         for apm in pmg.parameter_managers():
             if not engine:

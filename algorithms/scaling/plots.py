@@ -76,6 +76,29 @@ gi = Ci * Ri * Si
 """
 
 
+def plot_relative_Bs(relative_Bs):
+    """Make scatter plot of relative Bs for dose-decay"""
+    d = {
+        "dose_relative_Bs": {
+            "data": [
+                {
+                    "x": list(range(0, len(relative_Bs))),
+                    "y": relative_Bs,
+                    "type": "scatter",
+                    "name": "Relative B-factor per dataset",
+                    "mode": "markers",
+                }
+            ],
+            "layout": {
+                "title": "Relative B-factor per dataset",
+                "xaxis": {"anchor": "y", "title": "Sweep id"},
+                "yaxis": {"anchor": "x", "title": "Relative B (Angstrom^2)"},
+            },
+        }
+    }
+    return d
+
+
 def plot_dose_decay(dose_decay_model):
     """Plot the decay and scale corrections for the dose-decay model."""
     d = {
@@ -83,11 +106,7 @@ def plot_dose_decay(dose_decay_model):
             "data": [],
             "layout": {
                 "title": "Dose-decay model corrections",
-                "xaxis": {
-                    "domain": [0, 1],
-                    "anchor": "y",
-                    "title": "rotation angle (degrees)",
-                },
+                "xaxis": {"domain": [0, 1], "anchor": "y", "title": "phi (degrees)",},
                 "yaxis": {
                     "domain": [0, 0.45],
                     "anchor": "x",
@@ -156,15 +175,25 @@ def _add_decay_model_scales_to_data(model, data, yaxis="y", resolution=3.0):
     configdict = model.configdict
     valid_osc = configdict["valid_osc_range"]
 
-    sample_values = flex.double(
-        np.linspace(
-            valid_osc[0],
-            valid_osc[1],
-            int((valid_osc[1] - valid_osc[0]) / 0.1) + 1,
-            endpoint=True,
+    if model.id_ == "physical":
+        sample_values = flex.double(
+            np.linspace(
+                valid_osc[0],
+                valid_osc[1],
+                int((valid_osc[1] - valid_osc[0]) / 0.1) + 1,
+                endpoint=True,
+            )
+        )  # Make a grid of
+        # points with 10 points per degree.
+    elif model.id_ == "dose_decay":
+        sample_values = flex.double(
+            np.linspace(
+                0.0,
+                valid_osc[1] - valid_osc[0],
+                int((valid_osc[1] - valid_osc[0]) / 0.1) + 1,
+                endpoint=True,
+            )
         )
-    )  # Make a grid of
-    # points with 10 points per degree.
     d = flex.double(sample_values.size(), resolution)
 
     if "decay" in model.components:

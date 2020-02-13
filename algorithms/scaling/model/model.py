@@ -32,6 +32,7 @@ from dials.algorithms.scaling.plots import (
     plot_array_modulation_plot,
     plot_array_absorption_plot,
     plot_dose_decay,
+    plot_relative_Bs,
 )
 from dials_scaling_ext import (
     calc_theta_phi,
@@ -522,8 +523,8 @@ class DoseDecay(ScalingModelBase):
         """Create a :obj:`PhysicalScalingModel` from a dictionary."""
         if obj["__id__"] != cls.id_:
             raise RuntimeError("expected __id__ %s, got %s" % (cls.id_, obj["__id__"]))
-        (s_params, d_params, abs_params) = (None, None, None)
-        (s_params_sds, d_params_sds, a_params_sds) = (None, None, None)
+        (s_params, d_params, abs_params, B) = (None, None, None, None)
+        (s_params_sds, d_params_sds, a_params_sds, B_sd) = (None, None, None, None)
         configdict = obj["configuration_parameters"]
         is_scaled = obj["is_scaled"]
         if "scale" in configdict["corrections"]:
@@ -1236,3 +1237,11 @@ def plot_scaling_models(model_dict):
         model = entry_point.load().from_dict(model_dict)
         return model.plot_model_components()
     return OrderedDict()
+
+
+def make_combined_plots(data):
+    """Make any plots that require evaluation of all models."""
+    if all(d["__id__"] == "dose_decay" for d in data.values()):
+        relative_Bs = [d["relative_B"]["parameters"][0] for d in data.values()]
+        return plot_relative_Bs(relative_Bs)
+    return {}
