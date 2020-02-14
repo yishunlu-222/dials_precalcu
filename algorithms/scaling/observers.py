@@ -240,15 +240,15 @@ class ScalingModelObserver(Observer):
     def make_plots(self):
         """Generate scaling model component plot data."""
         d = OrderedDict()
+        combined_plots = make_combined_plots(self.data)
+        if combined_plots:
+            d.update(combined_plots)
         for key in sorted(self.data.keys()):
             scaling_model_plots = plot_scaling_models(self.data[key])
             for plot in scaling_model_plots.values():
                 plot["layout"]["title"] += " (dataset %s)" % key
             for name, plot in six.iteritems(scaling_model_plots):
                 d[name + "_" + str(key)] = plot
-        combined_plots = make_combined_plots(self.data)
-        if combined_plots:
-            d.update(combined_plots)
         graphs = {"scaling_model": d}
         return graphs
 

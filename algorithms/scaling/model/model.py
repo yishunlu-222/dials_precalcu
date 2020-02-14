@@ -68,6 +68,10 @@ decay_correction = True
     .type = bool
     .help = "Option to turn off decay correction."
     .expert_level = 1
+share.decay = True
+    .type = bool
+    .help = "Share the decay model between sweeps."
+    .expert_level = 1
 absorption_correction = False
     .type = bool
     .help = "Option to turn on spherical harmonic absorption correction."
@@ -303,6 +307,9 @@ class ScalingModelBase(object):
         """Record the intensity combination Imid value."""
         self._configdict["Imid"] = Imid
 
+    def get_shared_components(self):
+        return None
+
     def __str__(self):
         """:obj:`str`: Return a string representation of a scaling model."""
         msg = ["Scaling model:"]
@@ -404,6 +411,12 @@ class DoseDecay(ScalingModelBase):
             self.components["scale"].fix_initial_parameter()
         return True
 
+    def get_shared_components(self):
+        if "shared" in self.configdict:
+            if "decay" in self.configdict["shared"]:
+                return "decay"
+        return None
+
     def configure_components(self, reflection_table, experiment, params):
         """Add the required reflection table data to the model components."""
         phi = reflection_table["xyzobs.px.value"].parts()[2]
@@ -477,6 +490,8 @@ class DoseDecay(ScalingModelBase):
         osc_range = experiment.scan.get_oscillation_range()
         one_osc_width = experiment.scan.get_oscillation()[1]
         configdict.update({"valid_osc_range": osc_range})
+        if params.share.decay:
+            configdict.update({"shared": ["decay"]})
 
         configdict["corrections"].append("scale")
         n_scale_param, s_norm_fac, scale_rot_int = initialise_smooth_input(
@@ -1082,7 +1097,6 @@ class KBScalingModel(ScalingModelBase):
         if "decay" in self.components:
             self.components["decay"].data = {
                 "d": reflection_table["d"],
-                "id": reflection_table["id"],
             }
 
     @property

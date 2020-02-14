@@ -12,29 +12,41 @@ from scitbx import math as scitbxmath
 from scitbx.math import distributions
 
 
-def _get_smooth_plotting_data_from_model(physical_model, component="scale"):
+def _get_smooth_plotting_data_from_model(model, component="scale"):
     """Return a tuple of phis, parameters, parameter esds,
     sample positions for plotting and sample scale values."""
-    configdict = physical_model.configdict
-    valid_osc = configdict["valid_osc_range"]
-    sample_values = flex.double(
-        np.linspace(
-            valid_osc[0],
-            valid_osc[1],
-            int((valid_osc[1] - valid_osc[0]) / 0.1) + 1,
-            endpoint=True,
+    valid_osc = model.configdict["valid_osc_range"]
+    if model.id_ == "physical":
+        sample_values = flex.double(
+            np.linspace(
+                valid_osc[0],
+                valid_osc[1],
+                int((valid_osc[1] - valid_osc[0]) / 0.1) + 1,
+                endpoint=True,
+            )
+        )  # Make a grid of
+        # points with 10 points per degree.
+    elif model.id_ == "dose_decay":
+        sample_values = flex.double(
+            np.linspace(
+                0.0,
+                abs(valid_osc[1] - valid_osc[0]),
+                int((abs(valid_osc[1] - valid_osc[0])) / 0.1) + 1,
+                endpoint=True,
+            )
         )
-    )  # Make a grid of
-    # points with 10 points per degree.
     if component == "scale":
-        if "scale" in configdict["corrections"]:
-            scale_SF = physical_model.components["scale"]
-            norm_vals = sample_values / physical_model.configdict["scale_rot_interval"]
+        if "scale" in model.configdict["corrections"]:
+            scale_SF = model.components["scale"]
+            norm_vals = sample_values / model.configdict["scale_rot_interval"]
             scale_SF.data = {"x": norm_vals}
             scale_SF.update_reflection_data()
             s = scale_SF.calculate_scales()
+            offset = valid_osc[0]
+            if model.id_ == "dose_decay":
+                offset = 0
             smoother_phis = [
-                (i * configdict["scale_rot_interval"]) + valid_osc[0]
+                (i * model.configdict["scale_rot_interval"]) + offset
                 for i in scale_SF.smoother.positions()
             ]
         return (
@@ -45,14 +57,14 @@ def _get_smooth_plotting_data_from_model(physical_model, component="scale"):
             s,
         )
     if component == "decay":
-        if "decay" in configdict["corrections"]:
-            decay_SF = physical_model.components["decay"]
-            norm_vals = sample_values / physical_model.configdict["decay_rot_interval"]
+        if "decay" in model.configdict["corrections"]:
+            decay_SF = model.components["decay"]
+            norm_vals = sample_values / model.configdict["decay_rot_interval"]
             decay_SF.data = {"x": norm_vals, "d": flex.double(norm_vals.size(), 1.0)}
             decay_SF.update_reflection_data()
             s = decay_SF.calculate_scales()
             smoother_phis = [
-                (i * configdict["decay_rot_interval"]) + valid_osc[0]
+                (i * model.configdict["decay_rot_interval"]) + valid_osc[0]
                 for i in decay_SF._smoother.positions()
             ]
         return (
@@ -128,7 +140,7 @@ def plot_dose_decay(dose_decay_model):
 
     if "decay" in dose_decay_model.components:
         data = _add_decay_model_scales_to_data(
-            dose_decay_model, data, yaxis="y", resolution=3.0
+            dose_decay_model, data, yaxis="y", resolution=3.0,
         )
 
     d["dose_decay"]["data"] = data
@@ -189,8 +201,8 @@ def _add_decay_model_scales_to_data(model, data, yaxis="y", resolution=3.0):
         sample_values = flex.double(
             np.linspace(
                 0.0,
-                valid_osc[1] - valid_osc[0],
-                int((valid_osc[1] - valid_osc[0]) / 0.1) + 1,
+                abs(valid_osc[1] - valid_osc[0]),
+                int((abs(valid_osc[1] - valid_osc[0])) / 0.1) + 1,
                 endpoint=True,
             )
         )

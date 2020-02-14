@@ -42,7 +42,7 @@ def test_RefinerCalculator(small_reflection_table):
         "abs": SingleScaleFactor(flex.double([1.0])),
     }  # Create empty components.
     components["scale"].data = {"id": rt["id"]}
-    components["decay"].data = {"d": rt["d"], "id": rt["id"]}
+    components["decay"].data = {"d": rt["d"]}
     components["abs"].data = {"id": rt["id"]}
     for component in components.values():
         component.update_reflection_data()  # Add some data to components.
