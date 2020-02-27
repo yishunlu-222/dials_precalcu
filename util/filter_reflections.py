@@ -414,6 +414,7 @@ class FilterForExportAlgorithm(FilteringReductionMethods):
         combine_partials=True,
         partiality_threshold=0.99,
         d_min=None,
+        output_converted_intensities=True,
     ):
         """Apply the filtering methods to reflection table."""
         assert (
@@ -448,6 +449,28 @@ class FilterForExportAlgorithm(FilteringReductionMethods):
         if min_isigi:
             reflection_table = cls.filter_on_min_isigi(reflection_table, min_isigi)
 
+        if not output_converted_intensities:
+            if "sum" in cls.intensities:
+                reflection_table["intensity.sum.value"] /= reflection_table[
+                    "sum_conversion"
+                ]
+                reflection_table["intensity.sum.variance"] /= flex.pow2(
+                    reflection_table["sum_conversion"]
+                )
+            if "prf" in cls.intensities:
+                reflection_table["intensity.prf.value"] /= reflection_table[
+                    "prf_conversion"
+                ]
+                reflection_table["intensity.prf.variance"] /= flex.pow2(
+                    reflection_table["prf_conversion"]
+                )
+            if "scale" in cls.intensities:
+                reflection_table["intensity.scale.value"] *= reflection_table[
+                    "inverse_scale_factor"
+                ]
+                reflection_table["intensity.scale.variance"] *= flex.pow2(
+                    reflection_table["inverse_scale_factor"]
+                )
         return reflection_table
 
     @staticmethod
@@ -514,6 +537,7 @@ class PrfIntensityReducer(FilterForExportAlgorithm):
             reflection_table
         )
 
+        reflection_table["prf_conversion"] = conversion
         reflection_table["intensity.prf.value"] *= conversion
         reflection_table["intensity.prf.variance"] *= conversion * conversion
         return reflection_table
@@ -548,6 +572,7 @@ class SumIntensityReducer(FilterForExportAlgorithm):
             conversion = conversion.select(nonzero_sel)
             conversion /= reflection_table["partiality"]
 
+        reflection_table["sum_conversion"] = conversion
         reflection_table["intensity.sum.value"] *= conversion
         reflection_table["intensity.sum.variance"] *= conversion * conversion
         return reflection_table
@@ -598,6 +623,8 @@ class SumAndPrfIntensityReducer(FilterForExportAlgorithm):
             conversion = conversion.select(nonzero_sel)
             sum_conversion = conversion / reflection_table["partiality"]
 
+        reflection_table["prf_conversion"] = conversion
+        reflection_table["sum_conversion"] = sum_conversion
         reflection_table["intensity.sum.value"] *= sum_conversion
         reflection_table["intensity.sum.variance"] *= sum_conversion * sum_conversion
         reflection_table["intensity.prf.value"] *= conversion
