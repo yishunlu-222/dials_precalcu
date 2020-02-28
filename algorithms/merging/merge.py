@@ -160,6 +160,7 @@ def merge_and_truncate(params, experiments, reflections):
         d_min=params.d_min,
         combine_partials=params.combine_partials,
         partiality_threshold=params.partiality_threshold,
+        min_isigi=params.min_isigi,
     )
     # ^ scale factor has been applied, so now set to 1.0 - okay as not
     # going to output scale factor in merged mtz.
