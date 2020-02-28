@@ -51,7 +51,7 @@ class ScalerFactory(object):
     """Base class for Scaler Factories"""
 
     @classmethod
-    def filter_bad_reflections(cls, reflections):
+    def filter_bad_reflections(cls, reflections, min_isigi=-3.0):
         """Initial filter to select integrated reflections."""
         reasons = Reasons()
         mask = ~reflections.get_flags(reflections.flags.integrated, all=False)
@@ -60,6 +60,22 @@ class ScalerFactory(object):
             d_mask = reflections["d"] <= 0.0
             reasons.add_reason("bad d-value", d_mask.count(True))
             mask = mask | d_mask
+        if "intensity.prf.value" in reflections:
+            selection = (
+                reflections["intensity.prf.value"]
+                / flex.sqrt(reflections["intensity.prf.variance"])
+            ) < min_isigi
+            reasons.add_reason("profile I/sigI < %s" % min_isigi, selection.count(True))
+            mask = mask | selection
+        if "intensity.sum.value" in reflections:
+            selection = (
+                reflections["intensity.sum.value"]
+                / flex.sqrt(reflections["intensity.sum.variance"])
+            ) < min_isigi
+            reasons.add_reason(
+                "summation I/sigI < %s" % min_isigi, selection.count(True)
+            )
+            mask = mask | selection
         reflections.set_flags(mask, reflections.flags.excluded_for_scaling)
         return reflections, reasons
 
@@ -90,7 +106,9 @@ class SingleScalerFactory(ScalerFactory):
             experiment.scaling_model.id_,
         )
 
-        reflection_table, reasons = cls.filter_bad_reflections(reflection_table)
+        reflection_table, reasons = cls.filter_bad_reflections(
+            reflection_table, min_isigi=params.cut_data.min_isigi
+        )
 
         if "inverse_scale_factor" not in reflection_table:
             reflection_table["inverse_scale_factor"] = flex.double(
