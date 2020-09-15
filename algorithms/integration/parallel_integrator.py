@@ -303,8 +303,6 @@ def _assert_enough_memory(required_memory, max_memory_usage):
     """
             % (total_memory / 1e9, limit_memory / 1e9, required_memory / 1e9)
         )
-    else:
-        logger.info("Allocating %.1f MB memory", required_memory / 1e6)
 
 
 class IntegrationJob(object):
@@ -449,17 +447,17 @@ class IntegrationJob(object):
 
         # Print a histogram of reflections on frames
         if frame1 - frame0 > 1:
-            logger.info(
+            logger.debug(
                 " The following histogram shows the number of reflections predicted"
             )
-            logger.info(" to have all or part of their intensity on each frame.")
-            logger.info("")
-            logger.info(
+            logger.debug(" to have all or part of their intensity on each frame.")
+            logger.debug("")
+            logger.debug(
                 frame_hist(
                     self.reflections["bbox"].select(select_int), prefix=" ", symbol="*"
                 )
             )
-            logger.info("")
+            logger.debug("")
 
         # Construct the mask algorithm
         compute_mask = MaskCalculatorFactory.create(self.experiments, self.params)
@@ -568,13 +566,14 @@ class TaskManager(object):
         if self.params.integration.mp.njobs * self.params.integration.mp.nproc > 1:
 
             if self.params.integration.mp.method == "multiprocessing":
+                required = self.params.integration.mp.njobs * compute_required_memory(
+                    self.experiments[0].imageset, self.params.integration.block.size
+                )
                 _assert_enough_memory(
-                    self.params.integration.mp.njobs
-                    * compute_required_memory(
-                        self.experiments[0].imageset, self.params.integration.block.size
-                    ),
+                    required,
                     self.params.integration.block.max_memory_usage,
                 )
+                logger.info("Allocating %.1f MB memory", required / 1e6)
 
             def process_output(result):
                 for message in result[1]:
@@ -953,17 +952,17 @@ class ReferenceCalculatorJob(object):
 
         # Print a histogram of reflections on frames
         if frame1 - frame0 > 1:
-            logger.info(
+            logger.debug(
                 " The following histogram shows the number of reflections predicted"
             )
-            logger.info(" to have all or part of their intensity on each frame.")
-            logger.info("")
-            logger.info(
+            logger.debug(" to have all or part of their intensity on each frame.")
+            logger.debug("")
+            logger.debug(
                 frame_hist(
                     self.reflections["bbox"].select(select_int), prefix=" ", symbol="*"
                 )
             )
-            logger.info("")
+            logger.debug("")
 
         # Construct the mask algorithm
         compute_mask = MaskCalculatorFactory.create(self.experiments, self.params)
@@ -1125,13 +1124,13 @@ def calculate_reference_profiles(experiments, reflections, params=None):
     from dials.util import pprint
 
     # Create the reference manager
-    reference_manager = ReferenceCalculatorManager(experiments, reflections, params)
+    manager = ReferenceCalculatorManager(experiments, reflections, params)
 
-    reference_manager.run_tasks()
+    manager.run_tasks()
 
     # Set the reflections and profiles
-    reflections = reference_manager.result()
-    profiles = reference_manager.reference
+    # reflections = manager.result()
+    profiles = manager.reference
 
     # Write the profiles to file
     if params.integration.debug.reference.output:
@@ -1141,18 +1140,19 @@ def calculate_reference_profiles(experiments, reflections, params=None):
             pickle.dump(profiles, outfile)
 
     # Print the profiles to the debug log
-    for i in range(len(profiles)):
-        logger.debug("")
-        logger.debug("Reference Profiles for experiment %d" % i)
-        logger.debug("")
-        reference = profiles[i].reference()
-        for j in range(len(reference)):
-            data = reference.data(j)
-            logger.debug("Profile %d" % j)
-            if len(data) > 0:
-                logger.debug(pprint.profile3d(data))
-            else:
-                logger.debug("** NO PROFILE **")
+    if logger.getEffectiveLevel() <= logging.DEBUG:
+        for i in range(len(profiles)):
+            logger.debug("")
+            logger.debug("Reference Profiles for experiment %d", i)
+            logger.debug("")
+            reference = profiles[i].reference()
+            for j in range(len(reference)):
+                data = reference.data(j)
+                logger.debug("Profile %d", j)
+                if len(data) > 0:
+                    logger.debug(pprint.profile3d(data))
+                else:
+                    logger.debug("** NO PROFILE **")
     return profiles
 
 
@@ -1160,13 +1160,11 @@ def process_integration_3d_threaded(
     experiments, reflections, reference=None, params=None
 ):
     # Create the reference manager
-    integration_manager = IntegrationManager(
-        experiments, reflections, reference, params
-    )
+    manager = IntegrationManager(experiments, reflections, reference, params)
 
-    integration_manager.run_tasks()
+    manager.run_tasks()
 
-    reflections = integration_manager.result()
+    reflections = manager.result()
     return reflections
 
 

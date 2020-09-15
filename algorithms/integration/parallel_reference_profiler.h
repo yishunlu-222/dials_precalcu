@@ -675,7 +675,7 @@ namespace dials { namespace algorithms {
         std::ostringstream ss;
         ss << "Modelling " << std::setw(5) << count << " reflections on image "
            << std::setw(6) << zstart + i;
-        logger.info(ss.str().c_str());
+        logger.debug(ss.str().c_str());
       }
 
       // Wait for all the integration jobs to complete

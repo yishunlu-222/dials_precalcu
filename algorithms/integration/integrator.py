@@ -1379,14 +1379,9 @@ class Integrator3DThreaded(object):
         # Do profile modelling
         reference_profiles = None
         if self.params.integration.profile.fitting:
-
             logger.info(
                 "=" * 80 + "\n\n" + heading("Modelling reflection profiles") + "\n"
             )
-            # logger.info("")
-            # logger.info(heading("Modelling reflection profiles"))
-            # logger.info("")
-
             # Compute the reference profiles
             reference_profiles = calculate_reference_profiles(
                 self.experiments,
@@ -1394,11 +1389,7 @@ class Integrator3DThreaded(object):
                 self.params,
             )
 
-        logger.info("=" * 80)
-        logger.info("")
-        logger.info(heading("Integrating reflections"))
-        logger.info("")
-
+        logger.info("=" * 80 + "\n\n" + heading("Integrating reflections") + "\n")
         self.reflections = process_integration_3d_threaded(
             experiments=self.experiments,
             reflections=self.reflections,
