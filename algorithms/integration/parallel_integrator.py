@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 
 import logging
 import math
+from time import time
 
 import psutil
 
@@ -45,7 +46,6 @@ __all__ = [
     "GaussianRSReferenceProfileData",
     "IntegrationJob",
     "IntegrationManager",
-    "IntegratorProcessor",
     "IntensityCalculatorFactory",
     "Logger",
     "MaskCalculatorFactory",
@@ -54,7 +54,6 @@ __all__ = [
     "ReferenceCalculatorFactory",
     "ReferenceCalculatorJob",
     "ReferenceCalculatorManager",
-    "ReferenceCalculatorProcessor",
     "ReferenceProfileData",
     "SimpleBackgroundCalculator",
     "SimpleBlockList",
@@ -483,7 +482,7 @@ class IntegrationJob(object):
             compute_background=compute_background,
             compute_intensity=compute_intensity,
             logger=Logger(logger),
-            nthreads=self.params.integration.mp.nproc,
+            nthreads=1,  # self.params.integration.mp.nproc,
             buffer_size=self.params.integration.block.size,
             use_dynamic_mask=self.params.integration.use_dynamic_mask,
             debug=self.params.integration.debug.output,
@@ -516,38 +515,26 @@ class IntegrationJob(object):
             del self.reflections["shoebox"]
 
 
-class IntegrationManager(object):
+class TaskManager(object):
+
     """
     A class to manage processing book-keeping
     """
 
-    def __init__(self, experiments, reflections, reference, params):
-        """
-        Initialise the manager.
-
-        :param experiments: The list of experiments
-        :param reflections: The list of reflections
-        :param reference: The reference profiles
-        :param params: The phil parameters
-        """
-
-        # Save some data
+    def __init__(self, experiments, reflections, params):
         self.experiments = experiments
         self.reflections = reflections
-        self.reference = reference
-
-        # Save some parameters
         self.params = params
 
         # Set the finalized flag to False
         self.finalized = False
 
         # Initialise the timing information
-        # self.time = TimingInfo()
+        self.time = dials.algorithms.integration.TimingInfo()
 
-        self.initialize()
+        self._initialize()
 
-    def initialize(self):
+    def _initialize(self):
         """
         Initialise the processing
         """
@@ -555,15 +542,15 @@ class IntegrationManager(object):
         assert "bbox" in self.reflections, "Reflections have no bbox"
 
         # Compute the block size and jobs
-        self.compute_blocks()
-        self.compute_jobs()
+        self._compute_blocks()
+        self._compute_jobs()
         self.reflections = split_partials_over_boundaries(
             self.reflections, self.params.integration.block.size
         )
 
         # Create the reflection manager
         self.manager = SimpleReflectionManager(
-            self.blocks, self.reflections, self.params.integration.mp.njobs
+            self.blocks, self.reflections, self.params.integration.mp.nproc
         )
 
         # Parallel reading of HDF5 from the same handle is not allowed. Python
@@ -571,36 +558,58 @@ class IntegrationManager(object):
         # close and reopen file.
         self.experiments.nullify_all_single_file_reader_format_instances()
 
-    def task(self, index):
-        """
-        Get a task.
-        """
-        frames = self.manager.job(index)
-        experiments = self.experiments
-        reference = self.reference
-        reflections = self.manager.split(index)
-        if len(reflections) == 0:
-            logger.warning("No reflections in job %d ***", index)
-            task = NullTask(index=index, reflections=reflections)
-        else:
-            task = IntegrationJob(
-                index=index,
-                job=frames,
-                experiments=experiments,
-                reflections=reflections,
-                reference=reference,
-                params=self.params,
-            )
-        return task
+    def run_tasks(self):
+        """Run the tasks, using multiprocessing if applicable."""
+        # Print some output
+        start_time = time()
+        logger.info(self._summary())
 
-    def tasks(self):
+        # Execute each task
+        if self.params.integration.mp.njobs * self.params.integration.mp.nproc > 1:
+
+            if self.params.integration.mp.method == "multiprocessing":
+                _assert_enough_memory(
+                    self.params.integration.mp.njobs
+                    * compute_required_memory(
+                        self.experiments[0].imageset, self.params.integration.block.size
+                    ),
+                    self.params.integration.block.max_memory_usage,
+                )
+
+            def process_output(result):
+                for message in result[1]:
+                    logger.log(message.levelno, message.msg)
+                self._accumulate(result[0])
+
+            multi_node_parallel_map(
+                func=execute_parallel_task,
+                iterable=self._tasks(),
+                nproc=self.params.integration.mp.nproc,
+                njobs=self.params.integration.mp.njobs,
+                callback=process_output,
+                cluster_method=self.params.integration.mp.method,
+                preserve_order=True,
+                preserve_exception_message=True,
+            )
+        else:
+            for task in self._tasks():
+                result = task()
+                self._accumulate(result)
+
+        # Finalize the processing
+        self._finalize()
+        end_time = time()
+        self.time.user = end_time - start_time
+        logger.info(str(self.time))
+
+    def _tasks(self):
         """
         Iterate through the tasks.
         """
         for i in range(len(self)):
-            yield self.task(i)
+            yield self._task(i)
 
-    def accumulate(self, result):
+    def _accumulate(self, result):
         """Accumulate the results."""
         self.manager.accumulate(result.index, result.reflections)
         # self.time.read += result.read_time
@@ -608,7 +617,7 @@ class IntegrationManager(object):
         # self.time.process += result.process_time
         # self.time.total += result.total_time
 
-    def finalize(self):
+    def _finalize(self):
         """
         Finalize the processing and finish.
         """
@@ -642,25 +651,24 @@ class IntegrationManager(object):
         """
         return len(self.manager)
 
-    def compute_max_block_size(self):
+    def _compute_jobs(self):
         """
-        Compute the required memory
+        Compute the jobs
         """
-        total_memory = psutil.virtual_memory().available
-        max_memory_usage = self.params.integration.block.max_memory_usage
-        assert max_memory_usage > 0.0, "maximum memory usage must be > 0"
-        assert max_memory_usage <= 1.0, "maximum memory usage must be <= 1"
-        limit_memory = int(math.floor(total_memory * max_memory_usage))
-        return MultiThreadedIntegrator.compute_max_block_size(
-            self.experiments[0].imageset, max_memory_usage=limit_memory
-        )
+        imageset = self.experiments[0].imageset
+        array_range = imageset.get_array_range()
+        block = self.params.integration.block
+        assert block.units == "frames"
+        assert block.size > 0
+        self.blocks = SimpleBlockList(array_range, block.size)
+        assert len(self.blocks) > 0, "Invalid number of jobs"
 
-    def compute_blocks(self):
+    def _compute_blocks(self):
         """
         Compute the processing block size.
         """
         block = self.params.integration.block
-        max_block_size = self.compute_max_block_size()
+        max_block_size = self._compute_max_block_size()
         if block.size in [Auto, "auto", "Auto"]:
             assert block.threshold > 0, "Threshold must be > 0"
             assert block.threshold <= 1.0, "Threshold must be < 1"
@@ -701,19 +709,7 @@ class IntegrationManager(object):
         block.size = block_size
         block.units = "frames"
 
-    def compute_jobs(self):
-        """
-        Compute the jobs
-        """
-        imageset = self.experiments[0].imageset
-        array_range = imageset.get_array_range()
-        block = self.params.integration.block
-        assert block.units == "frames"
-        assert block.size > 0
-        self.blocks = SimpleBlockList(array_range, block.size)
-        assert len(self.blocks) > 0, "Invalid number of jobs"
-
-    def summary(self):
+    def _summary(self):
         """
         Get a summary of the processing
         """
@@ -763,6 +759,60 @@ class IntegrationManager(object):
             "%s\n"
         )
         return fmt % (block_size, self.params.integration.block.units, task_table)
+
+
+class IntegrationManager(TaskManager):
+    """
+    A class to manage processing book-keeping
+    """
+
+    def __init__(self, experiments, reflections, reference, params):
+        """
+        Initialise the manager.
+
+        :param experiments: The list of experiments
+        :param reflections: The list of reflections
+        :param reference: The reference profiles
+        :param params: The phil parameters
+        """
+
+        self.reference = reference
+        super(IntegrationManager, self).__init__(experiments, reflections, params)
+
+    def _task(self, index):
+        """
+        Get a task.
+        """
+        frames = self.manager.job(index)
+        experiments = self.experiments
+        reference = self.reference
+        reflections = self.manager.split(index)
+        if not reflections:
+            logger.warning("No reflections in job %d ***", index)
+            task = NullTask(index=index, reflections=reflections)
+        else:
+            task = IntegrationJob(
+                index=index,
+                job=frames,
+                experiments=experiments,
+                reflections=reflections,
+                reference=reference,
+                params=self.params,
+            )
+        return task
+
+    def _compute_max_block_size(self):
+        """
+        Compute the required memory
+        """
+        total_memory = psutil.virtual_memory().available
+        max_memory_usage = self.params.integration.block.max_memory_usage
+        assert max_memory_usage > 0.0, "maximum memory usage must be > 0"
+        assert max_memory_usage <= 1.0, "maximum memory usage must be <= 1"
+        limit_memory = int(math.floor(total_memory * max_memory_usage))
+        return MultiThreadedIntegrator.compute_max_block_size(
+            self.experiments[0].imageset, max_memory_usage=limit_memory
+        )
 
 
 class ReferenceCalculatorJob(object):
@@ -936,7 +986,7 @@ class ReferenceCalculatorJob(object):
             compute_background=compute_background,
             compute_reference=compute_reference,
             logger=Logger(logger),
-            nthreads=self.params.integration.mp.nproc,
+            nthreads=1,  # self.params.integration.mp.nproc,
             buffer_size=self.params.integration.block.size,
             use_dynamic_mask=self.params.integration.use_dynamic_mask,
             debug=self.params.integration.debug.output,
@@ -985,7 +1035,7 @@ class ReferenceCalculatorJob(object):
             del self.reflections["shoebox"]
 
 
-class ReferenceCalculatorManager(object):
+class ReferenceCalculatorManager(TaskManager):
     """
     A class to manage processing book-keeping
     """
@@ -998,61 +1048,24 @@ class ReferenceCalculatorManager(object):
         :param reflections: The list of reflections
         :param params: The phil parameters
         """
-
-        # Save some data
-        self.experiments = experiments
-        self.reflections = reflections
         self.reference = None
 
-        # Save some parameters
-        self.params = params
-
-        # Set the finalized flag to False
-        self.finalized = False
-
-        # Initialise the timing information
-        # self.time = TimingInfo()
-
-        self.initialize()
-
-    def initialize(self):
-        """
-        Initialise the processing
-        """
-        # Ensure the reflections contain bounding boxes
-        assert "bbox" in self.reflections, "Reflections have no bbox"
-
-        # Select only those reflections used in refinement
-        selection = self.reflections.get_flags(self.reflections.flags.reference_spot)
+        selection = reflections.get_flags(reflections.flags.reference_spot)
         if selection.count(True) == 0:
             raise RuntimeError("No reference reflections given")
-        self.reflections = self.reflections.select(selection)
-
-        # Compute the block size and jobs
-        self.compute_blocks()
-        self.compute_jobs()
-        self.reflections = split_partials_over_boundaries(
-            self.reflections, self.params.integration.block.size
+        reflections = reflections.select(selection)
+        super(ReferenceCalculatorManager, self).__init__(
+            experiments, reflections, params
         )
 
-        # Create the reflection manager
-        self.manager = SimpleReflectionManager(
-            self.blocks, self.reflections, self.params.integration.mp.njobs
-        )
-
-        # Parallel reading of HDF5 from the same handle is not allowed. Python
-        # multiprocessing is a bit messed up and used fork on linux so need to
-        # close and reopen file.
-        self.experiments.nullify_all_single_file_reader_format_instances()
-
-    def task(self, index):
+    def _task(self, index):
         """
         Get a task.
         """
         frames = self.manager.job(index)
         experiments = self.experiments
         reflections = self.manager.split(index)
-        if len(reflections) == 0:
+        if not reflections:
             logger.warning("No reflections in job %d ***", index)
             task = NullTask(index=index, reflections=reflections)
         else:
@@ -1065,14 +1078,7 @@ class ReferenceCalculatorManager(object):
             )
         return task
 
-    def tasks(self):
-        """
-        Iterate through the tasks.
-        """
-        for i in range(len(self)):
-            yield self.task(i)
-
-    def accumulate(self, result):
+    def _accumulate(self, result):
         """Accumulate the results."""
         self.manager.accumulate(result.index, result.reflections)
 
@@ -1081,7 +1087,7 @@ class ReferenceCalculatorManager(object):
         else:
             self.reference.accumulate(result.data)
 
-    def finalize(self):
+    def _finalize(self):
         """
         Finalize the processing and finish.
         """
@@ -1093,32 +1099,7 @@ class ReferenceCalculatorManager(object):
 
         self.finalized = True
 
-    def result(self):
-        """
-        Return the result.
-
-        :return: The result
-        """
-        assert self.finalized, "Manager is not finalized"
-        return self.manager.data()
-
-    def finished(self):
-        """
-        Return if all tasks have finished.
-
-        :return: True/False all tasks have finished
-        """
-        return self.finalized and self.manager.finished()
-
-    def __len__(self):
-        """
-        Return the number of tasks.
-
-        :return: the number of tasks
-        """
-        return len(self.manager)
-
-    def compute_max_block_size(self):
+    def _compute_max_block_size(self):
         """
         Compute the required memory
         """
@@ -1131,112 +1112,6 @@ class ReferenceCalculatorManager(object):
             self.experiments[0].imageset, max_memory_usage=limit_memory
         )
 
-    def compute_blocks(self):
-        """
-        Compute the processing block size.
-        """
-        block = self.params.integration.block
-        max_block_size = self.compute_max_block_size()
-        if block.size in [Auto, "auto", "Auto"]:
-            assert block.threshold > 0, "Threshold must be > 0"
-            assert block.threshold <= 1.0, "Threshold must be < 1"
-            nframes = sorted([b[5] - b[4] for b in self.reflections["bbox"]])
-            cutoff = int(block.threshold * len(nframes))
-            block_size = nframes[cutoff]
-            if block_size > max_block_size:
-                logger.warning(
-                    "Computed block size (%s) > maximum block size (%s).",
-                    block_size,
-                    max_block_size,
-                )
-                logger.warning(
-                    "Setting block size to maximum; some reflections may be partial"
-                )
-                block_size = max_block_size
-        else:
-            scan = self.experiments[0].scan
-            if block.units == "radians":
-                phi0, dphi = scan.get_oscillation(deg=False)
-                block_size = int(math.ceil(block.size / dphi))
-            elif block.units == "degrees":
-                phi0, dphi = scan.get_oscillation()
-                block_size = int(math.ceil(block.size / dphi))
-            elif block.units == "frames":
-                block_size = int(math.ceil(block.size))
-            else:
-                raise RuntimeError("Unknown block_size unit %r" % block.units)
-            if block_size > max_block_size:
-                raise RuntimeError(
-                    """
-          The requested block size (%s) is larger than the maximum allowable block
-          size (%s). Either decrease the requested block size or increase the
-          amount of available memory.
-        """
-                    % (block_size, max_block_size)
-                )
-        block.size = block_size
-        block.units = "frames"
-
-    def compute_jobs(self):
-        imageset = self.experiments[0].imageset
-        array_range = imageset.get_array_range()
-        block = self.params.integration.block
-        assert block.units == "frames"
-        assert block.size > 0
-        self.blocks = SimpleBlockList(array_range, block.size)
-        assert len(self.blocks) > 0, "Invalid number of jobs"
-
-    def summary(self):
-        """
-        Get a summary of the processing
-        """
-        # Compute the task table
-        if self.experiments.all_stills():
-            rows = [["#", "Group", "Frame From", "Frame To", "# Reflections"]]
-            for i in range(len(self)):
-                job = self.manager.job(i)
-                group = job.index()
-                f0, f1 = job.frames()
-                n = self.manager.num_reflections(i)
-                rows.append([str(i), str(group), str(f0), str(f1), str(n)])
-        elif self.experiments.all_sequences():
-            rows = [
-                [
-                    "#",
-                    "Frame From",
-                    "Frame To",
-                    "Angle From",
-                    "Angle To",
-                    "# Reflections",
-                ]
-            ]
-            for i in range(len(self)):
-                f0, f1 = self.manager.job(i)
-                scan = self.experiments[0].scan
-                p0 = scan.get_angle_from_array_index(f0)
-                p1 = scan.get_angle_from_array_index(f1)
-                n = self.manager.num_reflections(i)
-                rows.append([str(i), str(f0), str(f1), str(p0), str(p1), str(n)])
-        else:
-            raise RuntimeError("Experiments must be all sequences or all stills")
-
-        # The job table
-        task_table = tabulate(rows, headers="firstrow")
-
-        # The format string
-        if self.params.integration.block.size is None:
-            block_size = "auto"
-        else:
-            block_size = str(self.params.integration.block.size)
-        fmt = (
-            "Processing reflections in the following blocks of images:\n"
-            "\n"
-            " block_size: %s %s\n"
-            "\n"
-            "%s\n"
-        )
-        return fmt % (block_size, self.params.integration.block.units, task_table)
-
 
 def compute_required_memory(imageset, block_size):
     """
@@ -1246,134 +1121,53 @@ def compute_required_memory(imageset, block_size):
     return MultiThreadedIntegrator.compute_required_memory(imageset, block_size)
 
 
-class ReferenceCalculatorProcessor(object):
-    def __init__(self, experiments, reflections, params=None):
-        from dials.util import pprint
+def calculate_reference_profiles(experiments, reflections, params=None):
+    from dials.util import pprint
 
-        # Create the reference manager
-        reference_manager = ReferenceCalculatorManager(experiments, reflections, params)
+    # Create the reference manager
+    reference_manager = ReferenceCalculatorManager(experiments, reflections, params)
 
-        # Print some output
-        logger.info(reference_manager.summary())
+    reference_manager.run_tasks()
 
-        # Execute each task
-        if params.integration.mp.njobs > 1:
+    # Set the reflections and profiles
+    reflections = reference_manager.result()
+    profiles = reference_manager.reference
 
-            if params.integration.mp.method == "multiprocessing":
-                _assert_enough_memory(
-                    params.integration.mp.njobs
-                    * compute_required_memory(
-                        experiments[0].imageset, params.integration.block.size
-                    ),
-                    params.integration.block.max_memory_usage,
-                )
+    # Write the profiles to file
+    if params.integration.debug.reference.output:
+        with open(params.integration.debug.reference.filename, "wb") as outfile:
+            import six.moves.cPickle as pickle
 
-            def process_output(result):
-                for message in result[1]:
-                    logger.log(message.levelno, message.msg)
-                reference_manager.accumulate(result[0])
+            pickle.dump(profiles, outfile)
 
-            multi_node_parallel_map(
-                func=execute_parallel_task,
-                iterable=reference_manager.tasks(),
-                nproc=params.integration.mp.nproc,
-                njobs=params.integration.mp.njobs,
-                callback=process_output,
-                cluster_method=params.integration.mp.method,
-                preserve_order=True,
-                preserve_exception_message=True,
-            )
-        else:
-            for task in reference_manager.tasks():
-                result = task()
-                reference_manager.accumulate(result)
-
-        # Finalize the processing
-        reference_manager.finalize()
-
-        # Set the reflections and profiles
-        self._reflections = reference_manager.result()
-        self._profiles = reference_manager.reference
-
-        # Write the profiles to file
-        if params.integration.debug.reference.output:
-            with open(params.integration.debug.reference.filename, "wb") as outfile:
-                import six.moves.cPickle as pickle
-
-                pickle.dump(self._profiles, outfile)
-
-        # Print the profiles to the debug log
-        for i in range(len(self._profiles)):
-            logger.debug("")
-            logger.debug("Reference Profiles for experiment %d" % i)
-            logger.debug("")
-            reference = self._profiles[i].reference()
-            for j in range(len(reference)):
-                data = reference.data(j)
-                logger.debug("Profile %d" % j)
-                if len(data) > 0:
-                    logger.debug(pprint.profile3d(data))
-                else:
-                    logger.debug("** NO PROFILE **")
-
-    def reflections(self):
-        return self._reflections
-
-    def profiles(self):
-        return self._profiles
+    # Print the profiles to the debug log
+    for i in range(len(profiles)):
+        logger.debug("")
+        logger.debug("Reference Profiles for experiment %d" % i)
+        logger.debug("")
+        reference = profiles[i].reference()
+        for j in range(len(reference)):
+            data = reference.data(j)
+            logger.debug("Profile %d" % j)
+            if len(data) > 0:
+                logger.debug(pprint.profile3d(data))
+            else:
+                logger.debug("** NO PROFILE **")
+    return profiles
 
 
-class IntegratorProcessor(object):
-    def __init__(self, experiments, reflections, reference=None, params=None):
+def process_integration_3d_threaded(
+    experiments, reflections, reference=None, params=None
+):
+    # Create the reference manager
+    integration_manager = IntegrationManager(
+        experiments, reflections, reference, params
+    )
 
-        # Create the reference manager
-        integration_manager = IntegrationManager(
-            experiments, reflections, reference, params
-        )
+    integration_manager.run_tasks()
 
-        # Print some output
-        logger.info(integration_manager.summary())
-
-        # Execute each task
-        if params.integration.mp.njobs > 1:
-
-            if params.integration.mp.method == "multiprocessing":
-                _assert_enough_memory(
-                    params.integration.mp.njobs
-                    * compute_required_memory(
-                        experiments[0].imageset, params.integration.block.size
-                    ),
-                    params.integration.block.max_memory_usage,
-                )
-
-            def process_output(result):
-                for message in result[1]:
-                    logger.log(message.levelno, message.msg)
-                integration_manager.accumulate(result[0])
-
-            multi_node_parallel_map(
-                func=execute_parallel_task,
-                iterable=integration_manager.tasks(),
-                nproc=params.integration.mp.nproc,
-                njobs=params.integration.mp.njobs,
-                callback=process_output,
-                cluster_method=params.integration.mp.method,
-                preserve_order=True,
-                preserve_exception_message=True,
-            )
-        else:
-            for task in integration_manager.tasks():
-                result = task()
-                integration_manager.accumulate(result)
-
-        # Finalize the processing
-        integration_manager.finalize()
-
-        # Set the reflections and profiles
-        self._reflections = integration_manager.result()
-
-    def reflections(self):
-        return self._reflections
+    reflections = integration_manager.result()
+    return reflections
 
 
 def split_partials_over_boundaries(reflections, block_size):

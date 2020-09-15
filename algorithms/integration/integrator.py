@@ -13,8 +13,8 @@ import dials.extensions
 from dials.algorithms.integration import processor
 from dials.algorithms.integration.filtering import IceRingFilter
 from dials.algorithms.integration.parallel_integrator import (
-    IntegratorProcessor,
-    ReferenceCalculatorProcessor,
+    calculate_reference_profiles,
+    process_integration_3d_threaded,
 )
 from dials.algorithms.integration.processor import (
     Processor2D,
@@ -1374,43 +1374,37 @@ class Integrator3DThreaded(object):
             )
         )
 
-        # Do the initialisation
         self.initialise()
 
         # Do profile modelling
+        reference_profiles = None
         if self.params.integration.profile.fitting:
 
-            logger.info("=" * 80)
-            logger.info("")
-            logger.info(heading("Modelling reflection profiles"))
-            logger.info("")
+            logger.info(
+                "=" * 80 + "\n\n" + heading("Modelling reflection profiles") + "\n"
+            )
+            # logger.info("")
+            # logger.info(heading("Modelling reflection profiles"))
+            # logger.info("")
 
             # Compute the reference profiles
-            reference_calculator = ReferenceCalculatorProcessor(
-                experiments=self.experiments,
-                reflections=self.reflections,
-                params=self.params,
+            reference_profiles = calculate_reference_profiles(
+                self.experiments,
+                self.reflections,
+                self.params,
             )
-
-            # Get the reference profiles
-            self.reference_profiles = reference_calculator.profiles()
-        else:
-            self.reference_profiles = None
 
         logger.info("=" * 80)
         logger.info("")
         logger.info(heading("Integrating reflections"))
         logger.info("")
 
-        integrator = IntegratorProcessor(
+        self.reflections = process_integration_3d_threaded(
             experiments=self.experiments,
             reflections=self.reflections,
-            reference=self.reference_profiles,
+            reference=reference_profiles,
             params=self.params,
         )
-
-        # Process the reflections
-        self.reflections = integrator.reflections()
 
         # Do the finalisation
         self.finalise()
