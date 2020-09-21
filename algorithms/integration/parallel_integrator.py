@@ -69,7 +69,7 @@ class MaskCalculatorFactory(object):
     """
 
     @staticmethod
-    def create(experiments, params=None):
+    def create(experiments, algorithm="gaussian_rs"):
         """
         Select the mask calculator
         """
@@ -77,21 +77,11 @@ class MaskCalculatorFactory(object):
             GaussianRSMaskCalculatorFactory,
         )
 
-        # Get the parameters
-        if params is None:
-            from dials.command_line.integrate import phil_scope
-
-            params = phil_scope.extract()
-
         # Select the factory function
-        selection = params.profile.algorithm
-        if selection == "gaussian_rs":
-            algorithm = GaussianRSMaskCalculatorFactory.create(experiments)
+        if algorithm == "gaussian_rs":
+            return GaussianRSMaskCalculatorFactory.create(experiments)
         else:
             raise RuntimeError("Unknown profile model algorithm")
-
-        # Create the mask algorithm
-        return algorithm
 
 
 class BackgroundCalculatorFactory(object):
@@ -460,7 +450,10 @@ class IntegrationJob(object):
             logger.debug("")
 
         # Construct the mask algorithm
-        compute_mask = MaskCalculatorFactory.create(self.experiments, self.params)
+        compute_mask = MaskCalculatorFactory.create(
+            self.experiments,
+            self.params.profile.algorithm,
+        )
 
         # Construct the background algorithm
         compute_background = BackgroundCalculatorFactory.create(
@@ -965,7 +958,10 @@ class ReferenceCalculatorJob(object):
             logger.debug("")
 
         # Construct the mask algorithm
-        compute_mask = MaskCalculatorFactory.create(self.experiments, self.params)
+        compute_mask = MaskCalculatorFactory.create(
+            self.experiments,
+            self.params.profile.algorithm,
+        )
 
         # Construct the background algorithm
         compute_background = BackgroundCalculatorFactory.create(

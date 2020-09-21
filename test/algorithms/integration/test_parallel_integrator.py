@@ -37,11 +37,13 @@ def data(dials_regression):  # read experiments and reflections
 def test_gaussianrs_mask_calculator(data):
     from dials.algorithms.integration.parallel_integrator import MaskCalculatorFactory
 
-    algorithm = MaskCalculatorFactory.create(data.experiments)
+    mask_calculator = MaskCalculatorFactory.create(
+        data.experiments, algorithm="gaussian_rs"
+    )
     reflections = flex.reflection_table_to_list_of_reflections(data.reflections)
 
     for r in reflections:
-        algorithm(r, False)
+        mask_calculator(r, False)
 
 
 def test_simple_background_calculator(data):
