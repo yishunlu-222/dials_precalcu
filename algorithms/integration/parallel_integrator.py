@@ -63,6 +63,51 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def log_job_summary(reflections, job_index, frame0, frame1, job_type="Integration"):
+    """Print a helpful summary message about a processing job."""
+    from dials.algorithms.integration.integrator import frame_hist
+
+    assert job_type in ("Integration", "Modelling")
+    EPS = 1e-7
+    full_value = 0.997300203937 - EPS
+    fully_recorded = reflections["partiality"] > full_value
+    npart = fully_recorded.count(False)
+    nfull = fully_recorded.count(True)
+    select_ice = reflections.get_flags(reflections.flags.in_powder_ring)
+    nice = select_ice.count(True)
+    select_int = ~reflections.get_flags(reflections.flags.dont_integrate)
+    ntot = reflections.size()
+
+    def _integrate_summary():
+        return (
+            f"  Integrate:   {select_int.count(True)}\n"
+            if job_type == "Integration"
+            else f""
+        )
+
+    # Write some output
+    logger.info(
+        f"\n {job_type} job {job_index}, frames: {frame0} -> {frame1}"
+        f"\n"
+        f"\n Number of reflections\n"
+        f"  Partial:     {npart}\n"
+        f"  Full:        {nfull}\n"
+        f"  In ice ring: {nice}\n"
+        f"{_integrate_summary()}"
+        f"  Total:       {ntot}\n"
+    )
+
+    # Print a histogram of reflections on frames
+    if frame1 - frame0 > 1:
+        logger.debug(
+            f" The following histogram shows the number of reflections predicted"
+            f" to have all or part of their intensity on each frame."
+            f""
+            f"{frame_hist(reflections['bbox'].select(select_int), prefix=' ' , symbol='*')}"
+            f""
+        )
+
+
 class MaskCalculatorFactory(object):
     """
     A factory function to return a mask calculator object
@@ -404,50 +449,15 @@ class IntegrationJob(object):
         """
         Integrate the reflections
         """
-        from dials.algorithms.integration.integrator import frame_hist
 
         # Compute the partiality
         self.reflections.compute_partiality(self.experiments)
 
-        # Get some info
-        EPS = 1e-7
-        full_value = 0.997300203937 - EPS
-        fully_recorded = self.reflections["partiality"] > full_value
-        npart = fully_recorded.count(False)
-        nfull = fully_recorded.count(True)
-        select_ice = self.reflections.get_flags(self.reflections.flags.in_powder_ring)
-        select_int = ~self.reflections.get_flags(self.reflections.flags.dont_integrate)
-        nice = select_ice.count(True)
-        nint = select_int.count(True)
-        ntot = len(self.reflections)
         frame0, frame1 = imageset.get_scan().get_array_range()
-
         # Write some output
-        logger.info(" Beginning integration job %d" % self.index)
-        logger.info("")
-        logger.info(" Frames: %d -> %d" % (frame0, frame1))
-        logger.info("")
-        logger.info(" Number of reflections")
-        logger.info("  Partial:     %d" % npart)
-        logger.info("  Full:        %d" % nfull)
-        logger.info("  In ice ring: %d" % nice)
-        logger.info("  Integrate:   %d" % nint)
-        logger.info("  Total:       %d" % ntot)
-        logger.info("")
-
-        # Print a histogram of reflections on frames
-        if frame1 - frame0 > 1:
-            logger.debug(
-                " The following histogram shows the number of reflections predicted"
-            )
-            logger.debug(" to have all or part of their intensity on each frame.")
-            logger.debug("")
-            logger.debug(
-                frame_hist(
-                    self.reflections["bbox"].select(select_int), prefix=" ", symbol="*"
-                )
-            )
-            logger.debug("")
+        log_job_summary(
+            self.reflections, self.index, frame0, frame1, job_type="Integration"
+        )
 
         # Construct the mask algorithm
         compute_mask = MaskCalculatorFactory.create(
@@ -912,50 +922,15 @@ class ReferenceCalculatorJob(object):
         """
         Integrate the reflections
         """
-        from dials.algorithms.integration.integrator import frame_hist
 
         # Compute the partiality
         self.reflections.compute_partiality(self.experiments)
 
-        # Get some info
-        EPS = 1e-7
-        full_value = 0.997300203937 - EPS
-        fully_recorded = self.reflections["partiality"] > full_value
-        npart = fully_recorded.count(False)
-        nfull = fully_recorded.count(True)
-        select_ice = self.reflections.get_flags(self.reflections.flags.in_powder_ring)
-        select_int = ~self.reflections.get_flags(self.reflections.flags.dont_integrate)
-        nice = select_ice.count(True)
-        nint = select_int.count(True)
-        ntot = len(self.reflections)
         frame0, frame1 = imageset.get_scan().get_array_range()
-
         # Write some output
-        logger.info(" Beginning integration job %d" % self.index)
-        logger.info("")
-        logger.info(" Frames: %d -> %d" % (frame0, frame1))
-        logger.info("")
-        logger.info(" Number of reflections")
-        logger.info("  Partial:     %d" % npart)
-        logger.info("  Full:        %d" % nfull)
-        logger.info("  In ice ring: %d" % nice)
-        logger.info("  Integrate:   %d" % nint)
-        logger.info("  Total:       %d" % ntot)
-        logger.info("")
-
-        # Print a histogram of reflections on frames
-        if frame1 - frame0 > 1:
-            logger.debug(
-                " The following histogram shows the number of reflections predicted"
-            )
-            logger.debug(" to have all or part of their intensity on each frame.")
-            logger.debug("")
-            logger.debug(
-                frame_hist(
-                    self.reflections["bbox"].select(select_int), prefix=" ", symbol="*"
-                )
-            )
-            logger.debug("")
+        log_job_summary(
+            self.reflections, self.index, frame0, frame1, job_type="Modelling"
+        )
 
         # Construct the mask algorithm
         compute_mask = MaskCalculatorFactory.create(
