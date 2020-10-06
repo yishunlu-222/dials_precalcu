@@ -27,6 +27,7 @@
 #include <dials/algorithms/centroid/centroid.h>
 #include <dials/array_family/boost_python/flex_table_suite.h>
 #include <map>
+#include <ctime>
 
 #include <dials/algorithms/integration/interfaces.h>
 
@@ -44,6 +45,11 @@ namespace dials { namespace algorithms {
 
   using dials::model::AdjacencyList;
   using dials::model::Shoebox;
+
+  double timestamp() {
+    return ((double)clock()) / ((double)CLOCKS_PER_SEC);
+  }
+
 
   /**
    * Class to wrap logging
@@ -865,7 +871,9 @@ namespace dials { namespace algorithms {
         while (!notifier_.complete(buffer_.buffer_range()[0]))
           ;
       }
+      double st = timestamp();
       buffer_.copy(data, index);
+      read_time_ += timestamp() - st;
     }
 
     /**
@@ -879,7 +887,9 @@ namespace dials { namespace algorithms {
         while (!notifier_.complete(buffer_.buffer_range()[0]))
           ;
       }
+      double st = timestamp();
       buffer_.copy(data, mask, index);
+      read_time_ += timestamp() - st;
     }
 
     /**
@@ -895,7 +905,13 @@ namespace dials { namespace algorithms {
         while (!notifier_.complete(buffer_.buffer_range()[0]))
           ;
       }
+      double st = timestamp();
       buffer_.copy(data, mask, index);
+      read_time_ += timestamp() - st;
+    }
+
+    double read_time() const {
+      return read_time_;
     }
 
     /**
@@ -1046,6 +1062,7 @@ namespace dials { namespace algorithms {
     Notifier notifier_;
     int first_image_;
     std::size_t max_images_;
+    double read_time_;
   };
 
   /**
@@ -1175,6 +1192,24 @@ namespace dials { namespace algorithms {
     }
 
     /**
+     * @returns The read time
+     */
+    double read_time() const {
+      return read_time_;
+    }
+
+    double extract_time() const {
+      return extract_time_;
+    }
+
+    /**
+     * @returns The process time
+     */
+    double process_time() const {
+      return process_time_;
+    }
+
+    /**
      * Static method to get the memory in bytes needed
      * @param imageset the imageset class
      */
@@ -1249,7 +1284,7 @@ namespace dials { namespace algorithms {
                  af::const_ref<std::size_t> flags,
                  std::size_t nthreads,
                  bool use_dynamic_mask,
-                 const Logger &logger) const {
+                 const Logger &logger) {
       using dials::util::ThreadPool;
 
       // Create the thread pool
@@ -1262,11 +1297,13 @@ namespace dials { namespace algorithms {
       // Create the buffer manager
       BufferManager bm(buffer, bbox, flags, zstart);
 
+      double st = timestamp();
       // Loop through all the images
       for (std::size_t i = 0; i < zsize; ++i) {
         // Copy the image to the buffer. If the image number is greater than the
         // buffer size (i.e. we are now deleting old images) then wait for the
         // threads to finish so that we don't end up reading the wrong data
+        double start_time = timestamp();
         if (imageset.is_marked_for_rejection(i)) {
           bm.copy_when_ready(imageset.get_corrected_data(i), false, i);
         } else if (use_dynamic_mask) {
@@ -1275,6 +1312,8 @@ namespace dials { namespace algorithms {
         } else {
           bm.copy_when_ready(imageset.get_corrected_data(i), i);
         }
+        double diff = timestamp() - start_time;
+        read_time_ += diff;
 
         // Get the reflections recorded at this point
         af::const_ref<std::size_t> indices = lookup.indices(i);
@@ -1312,13 +1351,20 @@ namespace dials { namespace algorithms {
         ss << "Integrating " << std::setw(5) << count << " reflections on image "
            << std::setw(6) << zstart + i;
         logger.debug(ss.str().c_str());
+
       }
+
+      process_time_ += timestamp() - st;
 
       // Wait for all the integration jobs to complete
       bm.wait(pool);
+      extract_time_ += bm.read_time();
     }
 
     af::reflection_table reflections_;
+    double read_time_;
+    double extract_time_;
+    double process_time_;
   };
 
   /**

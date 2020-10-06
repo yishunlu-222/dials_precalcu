@@ -377,6 +377,7 @@ class IntegrationJob(object):
         self.reflections = reflections
         self.reference = reference
         self.params = params
+        self.time = dials.algorithms.integration.TimingInfo()
 
     def __call__(self):
         """
@@ -431,9 +432,9 @@ class IntegrationJob(object):
             index=self.index,
             reflections=self.reflections,
             data=None,
-            read_time=0,
-            extract_time=0,
-            process_time=0,
+            read_time=self.time.read,
+            extract_time=self.time.extract,
+            process_time=self.time.process,
             total_time=0,
         )
 
@@ -483,14 +484,17 @@ class IntegrationJob(object):
             compute_background=compute_background,
             compute_intensity=compute_intensity,
             logger=Logger(logger),
-            nthreads=1,  # self.params.integration.mp.nproc,
-            buffer_size=self.params.integration.block.size,
+            nthreads=self.params.integration.mp.nproc,
+            buffer_size=100,  # self.params.integration.block.size,
             use_dynamic_mask=self.params.integration.use_dynamic_mask,
             debug=self.params.integration.debug.output,
         )
 
         # Assign the reflections
         self.reflections = integrator.reflections()
+        self.time.read = integrator.read_time()
+        self.time.extract = integrator.extract_time()
+        self.time.process = integrator.process_time()
 
     def write_debug_files(self):
         """
@@ -539,6 +543,7 @@ class TaskManager(object):
         """
         Initialise the processing
         """
+        start_time = time()
         # Ensure the reflections contain bounding boxes
         assert "bbox" in self.reflections, "Reflections have no bbox"
 
@@ -551,13 +556,14 @@ class TaskManager(object):
 
         # Create the reflection manager
         self.manager = SimpleReflectionManager(
-            self.blocks, self.reflections, self.params.integration.mp.nproc
+            self.blocks, self.reflections, self.params.integration.mp.njobs
         )
 
         # Parallel reading of HDF5 from the same handle is not allowed. Python
         # multiprocessing is a bit messed up and used fork on linux so need to
         # close and reopen file.
         self.experiments.nullify_all_single_file_reader_format_instances()
+        self.time.initialize = time() - start_time
 
     def run_tasks(self):
         """Run the tasks, using multiprocessing if applicable."""
@@ -566,10 +572,10 @@ class TaskManager(object):
         logger.info(self._summary())
 
         # Execute each task
-        if self.params.integration.mp.njobs * self.params.integration.mp.nproc > 1:
+        if self.params.integration.mp.njobs > 1:
 
             if self.params.integration.mp.method == "multiprocessing":
-                required = self.params.integration.mp.njobs * compute_required_memory(
+                required = compute_required_memory(
                     self.experiments[0].imageset, self.params.integration.block.size
                 )
                 _assert_enough_memory(
@@ -614,9 +620,9 @@ class TaskManager(object):
     def _accumulate(self, result):
         """Accumulate the results."""
         self.manager.accumulate(result.index, result.reflections)
-        # self.time.read += result.read_time
-        # self.time.extract += result.extract_time
-        # self.time.process += result.process_time
+        self.time.read += result.read_time
+        self.time.extract += result.extract_time
+        self.time.process += result.process_time
         # self.time.total += result.total_time
 
     def _finalize(self):
@@ -853,6 +859,7 @@ class ReferenceCalculatorJob(object):
         self.experiments = experiments
         self.reflections = reflections
         self.params = params
+        self.time = dials.algorithms.integration.TimingInfo()
 
     def __call__(self):
         """
@@ -907,9 +914,9 @@ class ReferenceCalculatorJob(object):
             index=self.index,
             reflections=self.reflections,
             data=self.reference,
-            read_time=0,
-            extract_time=0,
-            process_time=0,
+            read_time=self.time.read,
+            extract_time=self.time.extract,
+            process_time=self.time.process,
             total_time=0,
         )
 
@@ -956,14 +963,18 @@ class ReferenceCalculatorJob(object):
             compute_background=compute_background,
             compute_reference=compute_reference,
             logger=Logger(logger),
-            nthreads=1,  # self.params.integration.mp.nproc,
-            buffer_size=self.params.integration.block.size,
+            nthreads=self.params.integration.mp.nproc,
+            buffer_size=100,  # self.params.integration.block.size,
             use_dynamic_mask=self.params.integration.use_dynamic_mask,
             debug=self.params.integration.debug.output,
         )
 
         # Assign the reflections
         self.reflections = reference_calculator.reflections()
+
+        self.time.read = reference_calculator.read_time()
+        self.time.process = reference_calculator.process_time()
+        self.time.extract = reference_calculator.extract_time()
 
         # Assign the reference profiles
         self.reference = compute_reference
@@ -1051,7 +1062,10 @@ class ReferenceCalculatorManager(TaskManager):
     def _accumulate(self, result):
         """Accumulate the results."""
         self.manager.accumulate(result.index, result.reflections)
-
+        self.time.extract += result.extract_time
+        self.time.read += result.read_time
+        self.time.process += result.process_time
+        # self.time.total += result.total_time
         if self.reference is None:
             self.reference = result.data
         else:

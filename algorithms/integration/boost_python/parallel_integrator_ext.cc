@@ -389,6 +389,9 @@ namespace dials { namespace algorithms { namespace boost_python {
                        arg("use_dynamic_mask") = true,
                        arg("debug") = false)))
       .def("reflections", &ParallelIntegrator::reflections)
+      .def("read_time", &ParallelIntegrator::read_time)
+      .def("extract_time", &ParallelIntegrator::extract_time)
+      .def("process_time", &ParallelIntegrator::process_time)
       .def("compute_required_memory",
            &ParallelIntegrator::compute_required_memory,
            (arg("imageset")))
@@ -419,6 +422,9 @@ namespace dials { namespace algorithms { namespace boost_python {
                        arg("use_dynamic_mask") = true,
                        arg("debug") = false)))
       .def("reflections", &ParallelReferenceProfiler::reflections)
+      .def("read_time", &ParallelReferenceProfiler::read_time)
+      .def("extract_time", &ParallelReferenceProfiler::extract_time)
+      .def("process_time", &ParallelReferenceProfiler::process_time)
       .def("compute_required_memory",
            &ParallelReferenceProfiler::compute_required_memory,
            (arg("imageset")))
