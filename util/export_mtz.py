@@ -243,6 +243,9 @@ class UnmergedMTZWriter(MTZWriterBase):
     def write_columns(self, reflection_table):
         """Write the column definitions AND data to the current dataset."""
 
+        print(len(set(reflection_table["partial_id"])))
+        print(len(reflection_table["partial_id"]))
+
         # now create the actual data structures - first keep a track of the columns
 
         # H K L M/ISYM BATCH I SIGI IPR SIGIPR FRACTIONCALC XDET YDET ROT WIDTH
@@ -487,6 +490,7 @@ def export_mtz(
         unique_offsets = set(effective_offsets)
     else:
         logger.debug("Keeping existing batches")
+    print(list(batch_offsets))
     image_ranges = get_image_ranges(experiment_list)
     if len(unique_offsets) != len(batch_offsets):
 

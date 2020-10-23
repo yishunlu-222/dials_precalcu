@@ -67,7 +67,6 @@ class ScalerFactory(object):
             min_isigi,
             partiality_cutoff,
         )
-        logger.disabled = True
         if intensity_choice == "combine":
             if "intensity.sum.value" not in reflections:
                 if "intensity.prf.value" not in reflections:
@@ -81,6 +80,7 @@ class ScalerFactory(object):
         else:
             intensity_choice = [intensity_choice]
         if intensity_choice:
+            logger.disabled = True
             good = filter_reflection_table_selection(
                 reflections,
                 intensity_choice=intensity_choice,
@@ -144,9 +144,10 @@ class SingleScalerFactory(ScalerFactory):
             reflection_table["inverse_scale_factor"] = flex.double(
                 reflection_table.size(), 1.0
             )
-        reflection_table = choose_initial_scaling_intensities(
-            reflection_table, params.reflection_selection.intensity_choice
-        )
+        if "intensity" not in reflection_table:
+            reflection_table = choose_initial_scaling_intensities(
+                reflection_table, params.reflection_selection.intensity_choice
+            )
 
         excluded_for_scaling = reflection_table.get_flags(
             reflection_table.flags.excluded_for_scaling

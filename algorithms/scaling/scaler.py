@@ -511,6 +511,11 @@ class SingleScaler(ScalerBase):
         self._combine_intensities()
 
     def _combine_intensities(self, use_Imid=None):
+
+        if ("intensity.prf.value" not in self.reflection_table) and (
+            "intensity.sum.value" not in self.reflection_table
+        ):
+            return
         try:
             if use_Imid is not None:
                 logger.info(
