@@ -203,11 +203,16 @@ class ScalerBase(Subject):
             self._update_after_minimisation(apm)
             logger.info("\n" + "=" * 80 + "\n")
 
+    def record_outliers_pre_error(self):
+        pass
+
     @Subject.notify_event(event="performed_error_analysis")
     def perform_error_optimisation(self, update_Ih=True):
         """Perform an optimisation of the sigma values."""
-        # error model should be determined using anomalous groups
+        # error model should be determined using anomalous group
+        self.record_outliers_pre_error()
         Ih_table, _ = self._create_global_Ih_table(anomalous=True, remove_outliers=True)
+
         try:
             model = run_error_model_refinement(
                 self.params.weighting.error_model, Ih_table
@@ -368,6 +373,7 @@ class SingleScaler(ScalerBase):
             self.outliers = outliers.select(self.suitable_refl_for_scaling_sel)
         else:
             self.outliers = flex.bool(self.n_suitable_refl, False)
+        self.outliers_pre_error = None
         self.scaling_subset_sel = (
             None  # A selection of len n_suitable_refl of scaling subset selection
         )
@@ -391,6 +397,12 @@ class SingleScaler(ScalerBase):
             "\n" + "=" * 80 + "\n"
         )
         log_memory_usage()
+
+    def record_outliers_pre_error(self):
+        import copy
+
+        if not self.outliers_pre_error:
+            self.outliers_pre_error = copy.deepcopy(self.outliers)
 
     def get_valid_reflections(self):
         """All reflections not bad for scaling or user excluded."""
@@ -739,7 +751,10 @@ attempting to use all reflections for minimisation."""
     ):
         sel_reflections = self.get_valid_reflections()
         if remove_outliers:
-            sel_reflections = sel_reflections.select(~self.outliers)
+            if self.outliers_pre_error:
+                sel_reflections = sel_reflections.select(~self.outliers_pre_error)
+            else:
+                sel_reflections = sel_reflections.select(~self.outliers)
         free_Ih_table = None
         global_Ih_table = IhTable(
             [sel_reflections],
@@ -859,6 +874,13 @@ class MultiScalerBase(ScalerBase):
         super(MultiScalerBase, self).__init__(single_scalers[0].params)
         self.single_scalers = single_scalers
 
+    def record_outliers_pre_error(self):
+        import copy
+
+        for s in self.single_scalers:
+            if not s.outliers_pre_error:
+                s.outliers_pre_error = copy.deepcopy(s.outliers)
+
     def remove_datasets(self, scalers, n_list):
         """
         Delete a scaler from the dataset.
@@ -971,10 +993,16 @@ class MultiScalerBase(ScalerBase):
 
     def _create_global_Ih_table(self, anomalous=False, remove_outliers=False):
         if remove_outliers:
-            tables = [
-                s.get_valid_reflections().select(~s.outliers)
-                for s in self.active_scalers
-            ]
+            if self.active_scalers[0].outliers_pre_error:
+                tables = [
+                    s.get_valid_reflections().select(~s.outliers_pre_error)
+                    for s in self.active_scalers
+                ]
+            else:
+                tables = [
+                    s.get_valid_reflections().select(~s.outliers)
+                    for s in self.active_scalers
+                ]
         else:
             tables = [s.get_valid_reflections() for s in self.active_scalers]
         free_set_percentage = 0.0

@@ -4,7 +4,7 @@ from __future__ import absolute_import, division, print_function
 
 import logging
 import time
-from collections import Counter, OrderedDict
+from collections import OrderedDict
 
 from iotbx import mtz
 from libtbx import env
@@ -488,14 +488,14 @@ def export_mtz(
     else:
         logger.debug("Keeping existing batches")
     image_ranges = get_image_ranges(experiment_list)
-    if len(unique_offsets) != len(batch_offsets):
+    """if len(unique_offsets) != len(batch_offsets):
 
         raise ValueError(
             "Duplicate batch offsets detected: %s"
             % ", ".join(
                 str(item) for item, count in Counter(batch_offsets).items() if count > 1
             )
-        )
+        )"""
 
     # Create the mtz file
     mtz_writer = UnmergedMTZWriter(experiment_list[0].crystal.get_space_group())
