@@ -11,10 +11,12 @@ from __future__ import absolute_import, division, print_function
 
 import copy
 import logging
+from collections import defaultdict
 
-from scitbx.array_family import flex
+from cctbx.array_family import flex
 
 from dials.algorithms.scaling.Ih_table import IhTable
+from dials.util import tabulate
 from dials_scaling_ext import determine_outlier_indices, limit_outlier_weights
 
 logger = logging.getLogger("dials")
@@ -56,7 +58,7 @@ def reject_outliers(reflection_table, experiment, method="standard", zmax=6.0):
     Ih_table = IhTable(
         [reflection_table], experiment.crystal.get_space_group(), nblocks=1
     )
-    outlier_indices = determine_outlier_index_arrays(
+    outlier_indices, _ = determine_outlier_index_arrays(
         Ih_table, method=method, zmax=zmax
     )[0]
 
@@ -118,7 +120,85 @@ def determine_outlier_index_arrays(Ih_table, method="standard", zmax=6.0, target
     n_outliers = sum(len(i) for i in outlier_index_arrays)
     msg += "{} outliers have been identified. \n".format(n_outliers)
     logger.info(msg)
-    return outlier_index_arrays
+    return outlier_index_arrays, outlier_rej.outlier_groups
+
+
+class OutlierGroups(object):
+    def __init__(self, n_datasets):
+        self.n_datasets = n_datasets
+        self.outlier_groups = defaultdict(int)
+        self.outlier_group_multiplicities = {}
+        self.suspect_groups = flex.miller_index()
+        self.suspect_outlier_arrays = []
+
+    def add_outliers(self, asu_indices, multiplicities):
+        for idx, n in zip(asu_indices, multiplicities):
+            self.outlier_groups[idx] += 1
+            if idx not in self.outlier_group_multiplicities:
+                self.outlier_group_multiplicities[idx] = n
+
+    def check_for_suspect_groups(self):
+        if not self.suspect_groups:
+            suspect_groups = flex.miller_index()
+            # best way - look at distribution of groups with more than 2 outliers and
+            # check likelihood of separation.
+            for k, v in self.outlier_groups.items():
+                # suspect group:
+                # if 2/4 outliers >= 50%
+                # 3/5, 3/6, 3/7, > 40%
+                # 4/8, 4/9, 4/10, 4/11 > 33%
+                # i.e. >33% for groups >4
+                n = self.outlier_group_multiplicities[k]
+                if n < 5 and v > 1:
+                    suspect_groups.append(k)
+                elif n < 8 and v > 3:
+                    suspect_groups.append(k)
+                elif (v / n) > (1 / 2.0):
+                    suspect_groups.append(k)
+            self.suspect_groups = suspect_groups
+        # also determine indices of suspect groups?
+
+    def determine_suspect_indices(self, Ih_table):
+        Ih_table = Ih_table.Ih_table_blocks[0]
+        self.check_for_suspect_groups()
+        logger.info(self)
+        selection = flex.bool(Ih_table.size, False)
+
+        for k in self.suspect_groups:
+            sel = k == Ih_table.asu_miller_index
+            selection.set_selected(sel.iselection(), True)
+
+        """for i, k in enumerate(Ih_table.asu_miller_index):
+            if k in self.suspect_groups:
+                sel[i] = True"""
+        print(selection.count(True))
+        outlier_indices = Ih_table.Ih_table["loc_indices"].select(selection)
+        datasets = Ih_table.Ih_table["dataset_id"].select(selection)
+
+        if self.n_datasets == 1:
+            self.suspect_outlier_arrays = [outlier_indices]
+        final_outlier_arrays = []
+        for i in range(self.n_datasets):
+            final_outlier_arrays.append(outlier_indices.select(datasets == i))
+        self.suspect_outlier_arrays = final_outlier_arrays
+
+    def __str__(self):
+        self.check_for_suspect_groups()
+        rows = []
+        nbad = len(self.suspect_groups)
+        for k, v in self.outlier_groups.items():
+            # suspect group: if 2/4 outliers 3/5, 3/6, 3/7, 4/8, 4/9, 4/10, 4/11 >33% for groups >4
+            n = self.outlier_group_multiplicities[k]
+            bad = "o"
+            if k in self.suspect_groups:
+                bad = "x"
+            rows.append([k, v, n, bad])
+        s = tabulate(
+            rows, ["asu index", "n_outliers", "group multiplicity", "good group"]
+        )
+        if nbad:
+            s += f"\n{nbad} suspect groups with a high fraction of outliers\n"
+        return s
 
 
 class OutlierRejectionBase(object):
@@ -150,13 +230,16 @@ Outlier rejection algorithms require an Ih_table with nblocks = 1"""
         self._zmax = zmax
         self._outlier_indices = flex.size_t([])
         self.final_outlier_arrays = None
+        self.outlier_groups = OutlierGroups(self._n_datasets)
 
     def run(self):
         """Run the outlier rejection algorithm, implemented by a subclass."""
         self._do_outlier_rejection()
-        self.final_outlier_arrays = self._determine_outlier_indices()
+        self.final_outlier_arrays = self._determine_outlier_indices(
+            self._outlier_indices, self._datasets
+        )
 
-    def _determine_outlier_indices(self):
+    def _determine_outlier_indices(self, outlier_indices, datasets):
         """
         Determine outlier indices with respect to the input reflection tables.
 
@@ -170,12 +253,10 @@ Outlier rejection algorithms require an Ih_table with nblocks = 1"""
                 reflection tables used to create the Ih_table.
         """
         if self._n_datasets == 1:
-            return [self._outlier_indices]
+            return [outlier_indices]
         final_outlier_arrays = []
         for i in range(self._n_datasets):
-            final_outlier_arrays.append(
-                self._outlier_indices.select(self._datasets == i)
-            )
+            final_outlier_arrays.append(outlier_indices.select(datasets == i))
         return final_outlier_arrays
 
     def _do_outlier_rejection(self):
@@ -286,6 +367,10 @@ class SimpleNormDevOutlierRejection(OutlierRejectionBase):
         norm_dev.set_selected(zero_sel, 1000)  # to trigger rejection
         outliers = flex.abs(norm_dev) > self._zmax
 
+        asu_indices = Ih_table.asu_miller_index.select(outliers)
+        n_group = Ih_table.calc_nh().select(outliers)
+        self.outlier_groups.add_outliers(asu_indices, n_group)
+
         self._outlier_indices.extend(Ih_table.Ih_table["loc_indices"].select(outliers))
         self._datasets.extend(
             self._Ih_table_block.Ih_table["dataset_id"].select(outliers)
@@ -358,6 +443,10 @@ class NormDevOutlierRejection(OutlierRejectionBase):
         outlier_indices, other_potential_outliers = determine_outlier_indices(
             Ih_table.h_index_matrix, all_z_scores, self._zmax
         )
+
+        asu_indices = Ih_table.asu_miller_index.select(outlier_indices)
+        n_group = nh.select(outlier_indices)
+        self.outlier_groups.add_outliers(asu_indices, n_group)
         self._outlier_indices.extend(
             self._Ih_table_block.Ih_table["loc_indices"].select(outlier_indices)
         )

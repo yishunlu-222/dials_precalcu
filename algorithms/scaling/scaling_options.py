@@ -195,6 +195,12 @@ phil_scope = iotbx.phil.parse(
       .help = "Cutoff z-score value for identifying outliers based on their
                normalised deviation within the group of equivalent reflections"
       .expert_level = 1
+    remove_suspect_groups = False
+      .type = bool
+      .help = "If True, groups with a high fraction of outliers are removed from
+              the dataset."
+    use_internal_variance_for_suspect_groups = False
+      .type = bool
   }
   """
 )

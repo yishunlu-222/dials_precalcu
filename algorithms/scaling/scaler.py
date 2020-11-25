@@ -797,20 +797,20 @@ attempting to use all reflections for minimisation."""
         """Perform a round of outlier rejection, set a new outliers array."""
         assert self.global_Ih_table is not None
         if self.params.scaling_options.outlier_rejection:
-            outlier_indices = determine_outlier_index_arrays(
+            outlier_indices, _ = determine_outlier_index_arrays(
                 self.global_Ih_table,
                 self.params.scaling_options.outlier_rejection,
                 self.params.scaling_options.outlier_zmax,
-            )[0]
+            )
             self.outliers = flex.bool(self.n_suitable_refl, False)
-            self.outliers.set_selected(outlier_indices, True)
+            self.outliers.set_selected(outlier_indices[0], True)
             if self._free_Ih_table:
-                free_outlier_indices = determine_outlier_index_arrays(
+                free_outlier_indices, _ = determine_outlier_index_arrays(
                     self._free_Ih_table,
                     self.params.scaling_options.outlier_rejection,
                     self.params.scaling_options.outlier_zmax,
-                )[0]
-                self.outliers.set_selected(free_outlier_indices, True)
+                )
+                self.outliers.set_selected(free_outlier_indices[0], True)
 
     def make_ready_for_scaling(self, outlier=True):
         """
@@ -1083,7 +1083,7 @@ class MultiScalerBase(ScalerBase):
                 anomalous=self.params.anomalous
             )
         if self.params.scaling_options.outlier_rejection:
-            outlier_index_arrays = determine_outlier_index_arrays(
+            outlier_index_arrays, suspect_groups = determine_outlier_index_arrays(
                 self.global_Ih_table,
                 self.params.scaling_options.outlier_rejection,
                 self.params.scaling_options.outlier_zmax,
@@ -1094,8 +1094,17 @@ class MultiScalerBase(ScalerBase):
             ):
                 scaler.outliers = flex.bool(scaler.n_suitable_refl, False)
                 scaler.outliers.set_selected(outlier_indices, True)
+            if True:
+                print("trying to exclude outlier groups")
+                suspect_groups.determine_suspect_indices(self.global_Ih_table)
+                for outlier_indices, scaler in zip(
+                    suspect_groups.suspect_outlier_arrays, self.active_scalers
+                ):
+                    logger.info(f"dataset suspect n_outliers: {outlier_indices.size()}")
+                    scaler.outliers.set_selected(outlier_indices, True)
+
             if self._free_Ih_table:
-                free_outlier_index_arrays = determine_outlier_index_arrays(
+                free_outlier_index_arrays, _ = determine_outlier_index_arrays(
                     self._free_Ih_table,
                     self.params.scaling_options.outlier_rejection,
                     self.params.scaling_options.outlier_zmax,
