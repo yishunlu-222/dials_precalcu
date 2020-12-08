@@ -797,13 +797,14 @@ attempting to use all reflections for minimisation."""
         """Perform a round of outlier rejection, set a new outliers array."""
         assert self.global_Ih_table is not None
         if self.params.scaling_options.outlier_rejection:
-            outlier_indices, _ = determine_outlier_index_arrays(
+            outlier_indices, suspect_groups = determine_outlier_index_arrays(
                 self.global_Ih_table,
                 self.params.scaling_options.outlier_rejection,
                 self.params.scaling_options.outlier_zmax,
             )
             self.outliers = flex.bool(self.n_suitable_refl, False)
             self.outliers.set_selected(outlier_indices[0], True)
+            self.suspect_groups = suspect_groups.suspect_groups
             if self._free_Ih_table:
                 free_outlier_indices, _ = determine_outlier_index_arrays(
                     self._free_Ih_table,
@@ -1094,7 +1095,9 @@ class MultiScalerBase(ScalerBase):
             ):
                 scaler.outliers = flex.bool(scaler.n_suitable_refl, False)
                 scaler.outliers.set_selected(outlier_indices, True)
-            if True:
+            suspect_groups.check_for_suspect_groups()
+            self.suspect_groups = suspect_groups.suspect_groups
+            if False:
                 print("trying to exclude outlier groups")
                 suspect_groups.determine_suspect_indices(self.global_Ih_table)
                 for outlier_indices, scaler in zip(

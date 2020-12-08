@@ -11,7 +11,6 @@ import six
 from jinja2 import ChoiceLoader, Environment, PackageLoader
 
 from cctbx import uctbx
-from scitbx.array_family import flex
 
 from dials.algorithms.scaling.error_model.error_model import (
     calc_deltahl,
@@ -35,6 +34,7 @@ from dials.algorithms.scaling.scaling_library import (
     DialsMergingStatisticsError,
     merging_stats_from_scaled_array,
 )
+from dials.array_family import flex
 from dials.report.analysis import (
     make_merging_statistics_summary,
     reflection_tables_to_batch_dependent_properties,
@@ -201,6 +201,14 @@ def _make_scaling_html(scaling_script):
     data.update(
         make_outlier_plots(scaling_script.reflections, scaling_script.experiments)
     )
+    data["outlier_plots"].update(
+        make_suspect_outlier_plots(
+            scaling_script.reflections,
+            scaling_script.experiments,
+            scaling_script.scaler.suspect_groups,
+            anomalous=scaling_script.params.anomalous,
+        )["outlier_plots"]
+    )
     data.update(
         make_error_model_plots(scaling_script.params, scaling_script.experiments)
     )
@@ -319,6 +327,75 @@ def make_outlier_plots(reflection_tables, experiments):
         d["outlier_plot_z" + str(key)] = outlier_plots["outliers_vs_z"]
     graphs = {"outlier_plots": d}
     return graphs
+
+
+def make_suspect_outlier_plots(
+    reflection_tables, experiments, suspect_groups, anomalous
+):
+    from dials.algorithms.scaling.Ih_table import map_indices_to_asu
+
+    data = {"outlier_plots": OrderedDict()}
+    data_per_group = {k: flex.reflection_table() for k in suspect_groups}
+    for refls in reflection_tables:
+        good = ~refls.get_flags(refls.flags.excluded_for_scaling) & ~refls.get_flags(
+            refls.flags.user_excluded_in_scaling
+        )
+        refls = refls.select(good)
+        refls["asu_miller_index"] = map_indices_to_asu(
+            refls["miller_index"],
+            experiments[0].crystal.get_space_group(),
+            anomalous=anomalous,
+        )
+        for k in suspect_groups:
+            sel = k == refls["asu_miller_index"]
+            data_per_group[k].extend(refls.select(sel))
+
+    for i, (k, v) in enumerate(data_per_group.items()):
+        p = plot_symmetry_group(v)
+        p[f"outlier_group_{i}"] = p["outlier_group"]
+        del p["outlier_group"]
+        data["outlier_plots"].update(p)
+    return data
+
+
+def plot_symmetry_group(refls):
+    x = refls["xyzobs.px.value"].parts()[2]
+    y = refls["intensity.scale.value"] / refls["inverse_scale_factor"]
+    err = refls["intensity.scale.variance"] ** 0.5 / refls["inverse_scale_factor"]
+    outliers = refls.get_flags(refls.flags.outlier_in_scaling)
+    idx = refls["miller_index"][0]
+    d = {
+        "outlier_group": {
+            "data": [
+                {
+                    "x": list(x.select(~outliers)),
+                    "y": list(y.select(~outliers)),
+                    "type": "scatter",
+                    "mode": "markers",
+                    "xaxis": "x",
+                    "yaxis": "y",
+                    "name": "Inlier observations",
+                    "error_y": {"type": "data", "array": list(err.select(~outliers))},
+                },
+                {
+                    "x": list(x.select(outliers)),
+                    "y": list(y.select(outliers)),
+                    "type": "scatter",
+                    "mode": "markers",
+                    "xaxis": "x",
+                    "yaxis": "y",
+                    "name": "Outlier observations",
+                    "error_y": {"type": "data", "array": list(err.select(outliers))},
+                },
+            ],
+            "layout": {
+                "title": f"Outliers in group {idx}",
+                "xaxis": {"anchor": "y", "title": "Image number"},
+                "yaxis": {"anchor": "x", "title": "Intensity"},
+            },
+        },
+    }
+    return d
 
 
 def make_error_model_plots(params, experiments):
