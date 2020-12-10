@@ -168,10 +168,6 @@ class OutlierGroups(object):
             sel = k == Ih_table.asu_miller_index
             selection.set_selected(sel.iselection(), True)
 
-        """for i, k in enumerate(Ih_table.asu_miller_index):
-            if k in self.suspect_groups:
-                sel[i] = True"""
-        print(selection.count(True))
         outlier_indices = Ih_table.Ih_table["loc_indices"].select(selection)
         datasets = Ih_table.Ih_table["dataset_id"].select(selection)
 
@@ -437,6 +433,7 @@ class NormDevOutlierRejection(OutlierRejectionBase):
         )
         norm_dev.set_selected(zero_sel, 1000)  # to trigger rejection
         z_score = flex.abs(norm_dev)
+
         # Want an array same size as Ih table.
         all_z_scores = flex.double(Ih_table.size, 0.0)
         all_z_scores.set_selected(sel.iselection(), z_score)

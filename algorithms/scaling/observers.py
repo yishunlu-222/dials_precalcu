@@ -335,6 +335,7 @@ def make_suspect_outlier_plots(
     from dials.algorithms.scaling.Ih_table import map_indices_to_asu
 
     data = {"outlier_plots": OrderedDict()}
+    print(list(suspect_groups))
     data_per_group = {k: flex.reflection_table() for k in suspect_groups}
     for refls in reflection_tables:
         good = ~refls.get_flags(refls.flags.excluded_for_scaling) & ~refls.get_flags(
@@ -363,7 +364,7 @@ def plot_symmetry_group(refls):
     y = refls["intensity.scale.value"] / refls["inverse_scale_factor"]
     err = refls["intensity.scale.variance"] ** 0.5 / refls["inverse_scale_factor"]
     outliers = refls.get_flags(refls.flags.outlier_in_scaling)
-    idx = refls["miller_index"][0]
+    idx = refls["asu_miller_index"][0]
     d = {
         "outlier_group": {
             "data": [

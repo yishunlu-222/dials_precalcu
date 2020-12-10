@@ -207,7 +207,18 @@ class ScalerBase(Subject):
     def perform_error_optimisation(self, update_Ih=True):
         """Perform an optimisation of the sigma values."""
         # error model should be determined using anomalous groups
-        Ih_table, _ = self._create_global_Ih_table(anomalous=True, remove_outliers=True)
+        # Ih_table, _ = self._create_global_Ih_table(anomalous=True, remove_outliers=True)
+        tables = [
+            s.get_reflections_for_model_minimisation() for s in self.active_scalers
+        ]
+        indices_lists = [s.scaling_selection.iselection() for s in self.active_scalers]
+        Ih_table = IhTable(
+            tables,
+            self.active_scalers[0].experiment.crystal.get_space_group(),
+            indices_lists=indices_lists,
+            nblocks=1,
+            anomalous=self.params.anomalous,
+        )
         try:
             model = run_error_model_refinement(
                 self.params.weighting.error_model, Ih_table
@@ -1097,14 +1108,14 @@ class MultiScalerBase(ScalerBase):
                 scaler.outliers.set_selected(outlier_indices, True)
             suspect_groups.check_for_suspect_groups()
             self.suspect_groups = suspect_groups.suspect_groups
-            if False:
-                print("trying to exclude outlier groups")
+            if True:
+                print("trying to include outlier groups")
                 suspect_groups.determine_suspect_indices(self.global_Ih_table)
                 for outlier_indices, scaler in zip(
                     suspect_groups.suspect_outlier_arrays, self.active_scalers
                 ):
                     logger.info(f"dataset suspect n_outliers: {outlier_indices.size()}")
-                    scaler.outliers.set_selected(outlier_indices, True)
+                    scaler.outliers.set_selected(outlier_indices, False)
 
             if self._free_Ih_table:
                 free_outlier_index_arrays, _ = determine_outlier_index_arrays(
