@@ -385,6 +385,9 @@ class BasicErrorModel(object):
             Ih_table, self.params, min_partiality
         )
         # always want binning info so that can calc for output.
+
+        self.truncate_error_distribution(self.parameters)
+
         self.binner = ErrorModelBinner(
             self.filtered_Ih_table, self.min_reflections_required, self.params.n_bins
         )
@@ -431,6 +434,33 @@ class BasicErrorModel(object):
             min_partiality=min_partiality,
             min_reflections_required=cls.min_reflections_required,
         )
+
+    def truncate_error_distribution(self, parameters):
+
+        sigmaprime = calc_sigmaprime(parameters, self.filtered_Ih_table)
+        delta_hl = calc_deltahl(
+            self.filtered_Ih_table, self.filtered_Ih_table.calc_nh(), sigmaprime
+        )
+        histy = flex.histogram(flex.sorted(flex.double(delta_hl)), n_slots=100)
+
+        x = histy.slot_centers()
+        y = histy.slots()
+        possel = x > 0
+        negsel = x < 0
+        # now find where y first dips below 2.
+        xlimpos = 0
+        xlimneg = 0
+        for xcentre, yval in zip(x.select(possel), y.select(possel)):
+            if yval < 2:
+                xlimpos = xcentre
+                break
+        for xcentre, yval in zip(x.select(negsel), y.select(negsel)):
+            if yval < 2:
+                xlimneg = xcentre
+                break
+        if xlimpos and xlimneg:
+            sel = (delta_hl > xlimneg) & (delta_hl < xlimpos)
+            self.filtered_Ih_table = self.filtered_Ih_table.select(sel)
 
     def calculate_sorted_deviations(self, parameters):
         """Sort the x,y data."""
