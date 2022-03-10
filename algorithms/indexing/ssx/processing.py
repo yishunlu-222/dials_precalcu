@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import math
 import os
@@ -76,6 +77,29 @@ def index_one(
             return idxr.refined_experiments, idxr.refined_reflections
 
 
+class OptionalZMQSocket(object):
+    def __init__(self, zmq_endpoint=None):
+        self.socket = None
+        if zmq_endpoint:
+            try:
+                import zmq
+            except ImportError:
+                sys.exit(
+                    "Error: ZMQ Endpoint requested but pyzmq not installed; aborting"
+                )
+            logger.debug("ZeroMQ binding requested at", zmq_endpoint)
+            zmq_context = zmq.Context()
+            self.socket = zmq_context.socket(zmq.PUB)
+            self.socket.bind(zmq_endpoint)
+
+    def __enter__(self):
+        return self.socket
+
+    def __exit__(self, exc_type, exc_val, traceback):
+        if self.socket:
+            self.socket.close()
+
+
 def index_all_concurrent(
     experiments: ExperimentList,
     reflections: List[flex.reflection_table],
@@ -92,7 +116,8 @@ def index_all_concurrent(
 
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=params.indexing.nproc
-    ) as pool:
+    ) as pool, OptionalZMQSocket(params.zmq_endpoint) as socket:
+
         sys.stdout = open(os.devnull, "w")  # block printing from rstbx
         futures = {
             pool.submit(index_one, expt, table, params, method_list, i): i
@@ -107,7 +132,26 @@ def index_all_concurrent(
                 j = futures[future]
             except Exception as e:
                 logger.info(e)
+                j = futures[future]
+                if socket:
+                    msg = {
+                        "image_no": j + 1,
+                        "n_indexed": 0,
+                        "n_strong": n_strong_per_image[img],
+                        "n_cryst": 0,
+                        "image": img,
+                    }
+                    socket.send_string("dials.ssx_index" + json.dumps(msg))
             else:
+                if socket:
+                    img = experiments[j].imageset.get_path(j).split("/")[-1]
+                    msg = {
+                        "image_no": j + 1,
+                        "n_indexed": 0,
+                        "n_strong": n_strong_per_image[img],
+                        "n_cryst": 0,
+                        "image": img,
+                    }
                 if refls and expts:
                     tables_list[j] = refls
                     elist = ExperimentList()
@@ -124,6 +168,11 @@ def index_all_concurrent(
                             )
                         )
                     expts_list[j] = elist
+                    if socket:
+                        msg["n_indexed"] = len(refls)
+                        msg["n_cryst"] = len(elist)
+                if socket:
+                    socket.send_string("dials.ssx_index" + json.dumps(msg))
 
     sys.stdout = sys.__stdout__  # restore printing
 

@@ -88,6 +88,10 @@ output.html = dials.ssx_index.html
     .type = str
 output.json = None
     .type = str
+zmq_endpoint = None
+    .type = str
+    .help = "The endpoint to bind a zeromq PUB socket to, for sending status updates"
+    .expert_level = 3
 include scope dials.command_line.index.phil_scope
 """,
     process_includes=True,
