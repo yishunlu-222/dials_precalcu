@@ -4,7 +4,6 @@ Definitions of the scaling algorithm.
 
 from __future__ import annotations
 
-import gc
 import itertools
 import json
 import logging
@@ -306,15 +305,9 @@ class ScalingAlgorithm:
         # joining reflection tables - just need experiments for mtz export
         # and a reflection table.
         del self.scaler
-        gc.collect()
         # update imageset ids before combining reflection tables.
         self.reflections = update_imageset_ids(self.experiments, self.reflections)
-        joint_table = flex.reflection_table()
-        for i in range(len(self.reflections)):
-            joint_table.extend(self.reflections[i])
-            # del reflection_table
-            self.reflections[i] = 0
-            gc.collect()
+        joint_table = flex.reflection_table.concat(self.reflections)
 
         # remove reflections with very low scale factors
         sel = joint_table["inverse_scale_factor"] <= 1e-6
