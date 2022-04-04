@@ -444,8 +444,12 @@ def intensity_array_from_cif_file(cif_file, anomalous_flag=True, d_min=0.4):
     return ic
 
 
-def intensity_array_from_pdb_file(pdb_file, anomalous_flag=True, d_min=2.0):
+def intensity_array_from_pdb_file(
+    pdb_file, anomalous_flag=True, d_min=2.0, wavelength=None
+):
     xray_structure = pdb.hierarchy.input(pdb_file).xray_structure_simple()
+    if wavelength:
+        xray_structure.set_inelastic_form_factors(photon=wavelength, table="sasaki")
     ic = (
         xray_structure.structure_factors(
             anomalous_flag=anomalous_flag, d_min=d_min, algorithm="direct"
@@ -552,7 +556,8 @@ def create_datastructures_for_structural_model(reflections, experiments, model_f
     if model_file.endswith(".cif"):
         ic = intensity_array_from_cif_file(model_file)
     elif model_file.endswith(".pdb"):
-        ic = intensity_array_from_pdb_file(model_file)
+        wavelength = np.mean([expt.beam.get_wavelength() for expt in experiments])
+        ic = intensity_array_from_pdb_file(model_file, wavelength=wavelength)
     else:
         raise ValueError("target_model not a recognised format (.pdb/.cif)")
 
