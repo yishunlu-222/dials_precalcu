@@ -460,7 +460,7 @@ def intensity_array_from_pdb_file(
     return ic
 
 
-def create_datastructures_for_target_mtz(experiments, mtz_file):
+def create_datastructures_for_target_mtz(experiments, mtz_file, anomalous=False):
     """Read a merged mtz file and extract miller indices, intensities and
     variances."""
     m = mtz.object(mtz_file)
@@ -468,54 +468,68 @@ def create_datastructures_for_target_mtz(experiments, mtz_file):
     cols = m.columns()
     col_dict = {c.label(): c for c in cols}
     r_t = flex.reflection_table()
-    if "I" in col_dict:  # nice and simple
-        r_t["miller_index"] = ind
-        r_t["intensity"] = col_dict["I"].extract_values().as_double()
-        r_t["variance"] = flex.pow2(col_dict["SIGI"].extract_values().as_double())
-    elif "IMEAN" in col_dict:  # nice and simple
-        r_t["miller_index"] = ind
-        r_t["intensity"] = col_dict["IMEAN"].extract_values().as_double()
-        r_t["variance"] = flex.pow2(col_dict["SIGIMEAN"].extract_values().as_double())
-    elif "I(+)" in col_dict:  # need to combine I+ and I- together into target Ih
-        if col_dict["I(+)"].n_valid_values() == 0:  # use I(-)
+    from dxtbx import flumpy
+
+    def _extract_anom(ind, col_dict):
+        table = flex.reflection_table()
+        r_tplus = flex.reflection_table()
+        r_tminus = flex.reflection_table()
+        r_tplus["miller_index"] = ind
+        r_tplus["intensity"] = col_dict["I(+)"].extract_values().as_double()
+        r_tplus["variance"] = flex.pow2(
+            col_dict["SIGI(+)"].extract_values().as_double()
+        )
+        r_tminus["miller_index"] = ind
+        r_tminus["intensity"] = col_dict["I(-)"].extract_values().as_double()
+        r_tminus["variance"] = flex.pow2(
+            col_dict["SIGI(-)"].extract_values().as_double()
+        )
+        r_tplus.extend(r_tminus)
+        r_tplus.set_flags(
+            flex.bool(r_tplus.size(), False), r_tplus.flags.bad_for_scaling
+        )
+        r_tplus = r_tplus.select(r_tplus["variance"] != 0.0)
+        Ih_table = create_Ih_table(
+            [experiments[0]], [r_tplus], anomalous=True
+        ).blocked_data_list[0]
+        table["intensity"] = flumpy.from_numpy(Ih_table.Ih_values)
+        inv_var = Ih_table.sum_in_groups(Ih_table.weights, output="per_refl")
+        table["variance"] = flumpy.from_numpy(1.0 / inv_var)
+        table["miller_index"] = Ih_table.asu_miller_index
+        return table
+
+
+    if anomalous:
+        try:
+            r_t = _extract_anom(ind, col_dict)
+        except KeyError:
+            pass
+    if not r_t:
+        if "I" in col_dict:  # nice and simple
             r_t["miller_index"] = ind
-            r_t["intensity"] = col_dict["I(-)"].extract_values().as_double()
-            r_t["variance"] = flex.pow2(
-                col_dict["SIGI(-)"].extract_values().as_double()
-            )
-        elif col_dict["I(-)"].n_valid_values() == 0:  # use I(+)
+            r_t["intensity"] = col_dict["I"].extract_values().as_double()
+            r_t["variance"] = flex.pow2(col_dict["SIGI"].extract_values().as_double())
+        elif "IMEAN" in col_dict:  # nice and simple
             r_t["miller_index"] = ind
-            r_t["intensity"] = col_dict["I(+)"].extract_values().as_double()
-            r_t["variance"] = flex.pow2(
-                col_dict["SIGI(+)"].extract_values().as_double()
-            )
-        else:  # Combine both - add together then use Ih table to calculate I and sigma
-            r_tplus = flex.reflection_table()
-            r_tminus = flex.reflection_table()
-            r_tplus["miller_index"] = ind
-            r_tplus["intensity"] = col_dict["I(+)"].extract_values().as_double()
-            r_tplus["variance"] = flex.pow2(
-                col_dict["SIGI(+)"].extract_values().as_double()
-            )
-            r_tminus["miller_index"] = ind
-            r_tminus["intensity"] = col_dict["I(-)"].extract_values().as_double()
-            r_tminus["variance"] = flex.pow2(
-                col_dict["SIGI(-)"].extract_values().as_double()
-            )
-            r_tplus.extend(r_tminus)
-            r_tplus.set_flags(
-                flex.bool(r_tplus.size(), False), r_tplus.flags.bad_for_scaling
-            )
-            r_tplus = r_tplus.select(r_tplus["variance"] != 0.0)
-            Ih_table = create_Ih_table(
-                [experiments[0]], [r_tplus], anomalous=True
-            ).blocked_data_list[0]
-            r_t["intensity"] = Ih_table.Ih_values
-            inv_var = Ih_table.sum_in_groups(Ih_table.weights, output="per_refl")
-            r_t["variance"] = 1.0 / inv_var
-            r_t["miller_index"] = Ih_table.miller_index
-    else:
-        raise KeyError("Unable to find intensities (tried I, IMEAN, I(+)/I(-))")
+            r_t["intensity"] = col_dict["IMEAN"].extract_values().as_double()
+            r_t["variance"] = flex.pow2(col_dict["SIGIMEAN"].extract_values().as_double())
+        elif "I(+)" in col_dict:  # need to combine I+ and I- together into target Ih
+            if col_dict["I(+)"].n_valid_values() == 0:  # use I(-)
+                r_t["miller_index"] = ind
+                r_t["intensity"] = col_dict["I(-)"].extract_values().as_double()
+                r_t["variance"] = flex.pow2(
+                    col_dict["SIGI(-)"].extract_values().as_double()
+                )
+            elif col_dict["I(-)"].n_valid_values() == 0:  # use I(+)
+                r_t["miller_index"] = ind
+                r_t["intensity"] = col_dict["I(+)"].extract_values().as_double()
+                r_t["variance"] = flex.pow2(
+                    col_dict["SIGI(+)"].extract_values().as_double()
+                )
+            else:  # Combine both - add together then use Ih table to calculate I and sigma
+                r_t = _extract_anom(ind, col_dict)
+        else:
+            raise KeyError("Unable to find intensities (tried I, IMEAN, I(+)/I(-))")
     logger.info(f"Extracted {r_t.size()} intensities from target mtz")
     r_t = r_t.select(r_t["variance"] > 0.0)
     if r_t.size() == 0:
