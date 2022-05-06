@@ -184,6 +184,9 @@ class cosym(Subject):
             datasets = [d for d, o in zip(datasets_, reindexing_ops) if o == cb_op]
             logger.info(f"{cb_op}: {datasets}")
 
+        to_exclude = self.cosym_analysis.to_exclude
+        print(to_exclude)
+
         self._apply_reindexing_operators(
             reindexing_ops, subgroup=self.cosym_analysis.best_subgroup
         )
@@ -234,10 +237,13 @@ class cosym(Subject):
             )
             refl["miller_index"] = cb_op.apply(refl["miller_index"])
         # Allow for the case where some datasets are filtered out.
-        if len(reindexing_ops) < len(self._experiments):
+        if (
+            len(reindexing_ops) < len(self._experiments)
+            or self.cosym_analysis.to_exclude
+        ):
             to_delete = [
                 i for i in range(len(self._experiments)) if i not in unique_ids
-            ]
+            ] + self.cosym_analysis.to_exclude
             for idx in sorted(to_delete, reverse=True):
                 logger.info(
                     f"Removing dataset {idx} as unable to determine reindexing operator"

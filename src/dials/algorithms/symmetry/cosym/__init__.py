@@ -83,6 +83,16 @@ min_pairs = 3
   .help = 'Minimum number of pairs for inclusion of correlation coefficient in calculation of Rij matrix.'
   .short_caption = "Minimum number of pairs"
 
+filtering {
+  cc_star_threshold = None
+    .type = float(value_min=0, allow_none=True)
+    .help = "Filter out datasets with estimated cc* below this threshold, based on"
+          "the cosym coordinates"
+  minimum_angular_separation = None
+    .type = float(value_min=0, allow_none=True)
+    .help = "Filter out datasets where the difference between the angle to the"
+            "closest cluster and the next-nearest cluster is below this value."
+}
 minimization
   .short_caption = "Minimization"
 {
@@ -381,7 +391,10 @@ class CosymAnalysis(symmetry_base, Subject):
         n_sym_ops = len(sym_ops)
         coord_ids = np.arange(n_datasets * n_sym_ops)
         dataset_ids = coord_ids % n_datasets
+        self.to_exclude = []
 
+        cc_threshold = self.params.filtering.cc_star_threshold
+        angle_tolerance = self.params.filtering.minimum_angular_separation
         # choose a high density point as seed
         X = coords
         nbrs = NearestNeighbors(
@@ -391,6 +404,20 @@ class CosymAnalysis(symmetry_base, Subject):
         average_distance = np.array([dist[1:].mean() for dist in distances])
         i = average_distance.argmin()
         xis = np.array([X[i]])
+        others = [
+            (i + (n_datasets * j)) % (n_datasets * n_sym_ops) for j in range(n_sym_ops)
+        ]
+        seed_coord = ", ".join(f"{i:.4f}" for i in xis[0])
+        logger.info(f"Cluster seed coordinates:\n  {seed_coord}")
+        others = set(others).difference({i})
+        yis = [np.array([X[i]]) for i in others]
+
+        other_seed_coords = "\n  ".join(
+            ", ".join(f"{i:.4f}" for i in x[0]) for x in yis
+        )
+        logger.info(
+            f"Seed coordinates under symmetry transforms:\n  {other_seed_coords}"
+        )
 
         for j in range(n_datasets):
             sel = np.where(dataset_ids == j)
@@ -399,9 +426,62 @@ class CosymAnalysis(symmetry_base, Subject):
             nbrs = NearestNeighbors(
                 n_neighbors=min(1, len(X)), algorithm="brute", metric="cosine"
             ).fit(X)
-            distances, indices = nbrs.kneighbors([xis.mean(axis=0)])
+            xmean = xis.mean(axis=0)
+            distances, indices = nbrs.kneighbors([xmean])
+
             k = indices[0][0]
-            xis = np.append(xis, [X[k]], axis=0)
+            x = X[k]
+            modx = np.linalg.norm(x)
+            # now test for angular threshold.
+            # first need to update other clusters
+            y_this = []
+            ymeans = []
+            for m in range(len(yis)):
+                ymean = yis[m].mean(axis=0)
+                ymeans.append(ymean)
+                distances, indices = nbrs.kneighbors([ymean])
+                ky = indices[0][0]
+                y = X[ky]
+                y_this.append(y)
+
+            excluded = False
+            if angle_tolerance:
+                thetas = np.zeros(shape=(len(yis) + 1,))
+                for i, centre in enumerate([xmean] + ymeans):
+                    theta = math.acos(
+                        round(np.dot(x, centre) / (modx * np.linalg.norm(centre)), 8)
+                    )
+                    thetas[i] = theta * 180 / math.pi
+                min_theta = np.argmin(thetas)
+                d = np.expand_dims(thetas, 1) - thetas
+                d_others = np.concatenate(
+                    (d[min_theta, 0:min_theta], d[min_theta, min_theta + 1 :])
+                )
+                if any(np.abs(d_others) < angle_tolerance):
+                    logger.info(f"Dataset {j} is below the angle tolerance")
+                    self.to_exclude.append(j)
+                    excluded = True
+
+                elif all(thetas > 90.0):
+                    logger.info(f"Dataset {j} does not agree well with any cluster")
+                    self.to_exclude.append(j)
+                    excluded = True
+            if cc_threshold and not excluded:
+                if modx < cc_threshold:
+                    logger.info(f"Dataset {j} is below the cc threshold")
+                    self.to_exclude.append(j)
+                    excluded = True
+            if not excluded:
+                for m, _ in enumerate(yis):
+                    yis[m] = np.append(yis[m], [y_this[m]], axis=0)
+                xis = np.append(xis, [x], axis=0)
+            else:
+                vals = "\n  ".join(
+                    ", ".join(f"{i:.4f}" for i in x) for x in [xmean] + ymeans
+                )
+                logger.debug(f"Coordinate: {x}")
+                logger.debug(f"Cluster centres:\n  {vals}")
+
             for partition in cosets.partitions:
                 if sym_ops[k] in partition:
                     cb_op = sgtbx.change_of_basis_op(partition[0]).new_denominators(
@@ -413,6 +493,16 @@ class CosymAnalysis(symmetry_base, Subject):
                         ).as_xyz()
                     )
                     break
+
+        xmean = xis.mean(axis=0)
+        ymeans = []
+        for m in range(len(yis)):
+            ymean = yis[m].mean(axis=0)
+            ymeans.append(ymean)
+        other_seed_coords = "\n  ".join(
+            ", ".join(f"{i:.4f}" for i in x) for x in [xmean] + ymeans
+        )
+        logger.info(f"Cluster centres final coordinates:\n  {other_seed_coords}")
 
         return reindexing_ops
 
