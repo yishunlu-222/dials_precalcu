@@ -34,6 +34,7 @@ from dials.array_family import flex
 from dials.util import Sorry
 from dials.util.options import ArgumentParser
 from dials.util.reference import (
+    intensities_from_reference_file,
     intensities_from_reference_model_file,
     intensity_array_from_mtz_file,
 )
@@ -477,9 +478,7 @@ def create_datastructures_for_structural_model(
     reflection table to be used for the structural model in scaling."""
 
     wavelength = np.mean([expt.beam.get_wavelength() for expt in experiments])
-    ic = intensities_from_reference_model_file(
-        model_file, d_min=d_min, wavelength=wavelength
-    )
+    ic = intensities_from_reference_file(model_file, d_min=d_min, wavelength=wavelength)
     if not anomalous:
         ic = ic.as_non_anomalous_array().merge_equivalents().array()
 
