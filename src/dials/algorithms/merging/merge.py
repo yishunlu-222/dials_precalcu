@@ -9,6 +9,7 @@ from jinja2 import ChoiceLoader, Environment, PackageLoader
 
 from cctbx import uctbx
 from mmtbx.scaling import data_statistics
+from mmtbx.scaling.twin_analyses import l_test
 
 from dials.algorithms.scaling.Ih_table import (
     _reflection_table_to_iobs,
@@ -445,6 +446,78 @@ https://strucbio.biologie.uni-konstanz.de/ccp4wiki/index.php?title=SHELX_C/D/E
     return data
 
 
+def make_ltest_table(ltest_result):
+    header = ["|l|", "Observed", "Acentric theory", "Acentric theory, perfect twin"]
+    rows = []
+    for i, l in enumerate(list(ltest_result.l_values)):
+        rows.append(
+            [
+                f"{l:4.2f}",
+                f"{ltest_result.l_cumul[i]:6.3f}",
+                f"{ltest_result.l_cumul_untwinned[i]:6.3f}",
+                f"{ltest_result.l_cumul_perfect_twin[i]:6.3f}",
+            ]
+        )
+    return tabulate(rows, header)
+
+
+def make_ltest_plots(anomalous_data):
+    """
+    Make dicts of data for plotting e.g. for plotly.
+
+    Args:
+        anomalous_data (dict) : A dict of (wavelength, anomalous array) data.
+
+    Returns:
+        dict: A dictionary containing the plotting data.
+    """
+
+    data = {
+        "ltest": {
+            "data": [],
+            "help": """\
+This plot shows the cumulative intensity statistics (Yeates-Padilla test)
+""",
+        },
+    }
+    for wave, anom in anomalous_data.items():
+        ltest = l_test(anom)
+        data["ltest"]["data"].append(
+            {
+                "x": list(ltest.l_values),
+                "y": list(ltest.l_cumul),
+                "type": "scatter",
+                "name": "Observed (" + "\u03BB" + f"={wave:.4f})",
+                "mode": "lines",
+            }
+        )
+    data["ltest"]["data"].append(
+        {
+            "x": list(ltest.l_values),
+            "y": list(ltest.l_cumul_untwinned),
+            "type": "scatter",
+            "name": "Untwinned",
+            "mode": "lines",
+        }
+    )
+    data["ltest"]["data"].append(
+        {
+            "x": list(ltest.l_values),
+            "y": list(ltest.l_cumul_perfect_twin),
+            "type": "scatter",
+            "name": "Perfect twin",
+            "mode": "lines",
+        }
+    )
+
+    data["ltest"]["layout"] = {
+        "title": "L test (Padilla and Yeates)",
+        "xaxis": {"title": "|l|", "range": (0, 1)},
+        "yaxis": {"title": "P(L >= l)", "range": (0, 1)},
+    }
+    return data
+
+
 def generate_html_report(mtz_file, filename):
     """Make a html report to plot dano/sigdano."""
     anom_data = {}
@@ -459,6 +532,7 @@ def generate_html_report(mtz_file, filename):
     if not anom_data:
         return
     data = make_dano_plots(anom_data)
+    data["dF"].update(make_ltest_plots(anom_data))
 
     loader = ChoiceLoader(
         [
@@ -470,7 +544,7 @@ def generate_html_report(mtz_file, filename):
     template = env.get_template("simple_report.html")
     html = template.render(
         page_title="DIALS merge report",
-        panel_title="Anomalous signal",
+        panel_title="Anomalous signal & twinning statistics",
         panel_id="Anomalous signal",
         graphs=data["dF"],
     )

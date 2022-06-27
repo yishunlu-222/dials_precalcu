@@ -10,11 +10,13 @@ from io import StringIO
 
 from dxtbx.model import ExperimentList
 from iotbx import phil
+from mmtbx.scaling.twin_analyses import l_test
 
 from dials.algorithms.merging.merge import (
     MTZDataClass,
     generate_html_report,
     make_dano_table,
+    make_ltest_table,
     make_merged_mtz_file,
     merge,
     show_wilson_scaling_analysis,
@@ -240,6 +242,11 @@ def merge_data_to_mtz(params, experiments, reflections):
 
         # print out analysis statistics
         show_wilson_scaling_analysis(merged_intensities)
+
+        ltest_result = l_test(amplitudes)
+        l_test_table = make_ltest_table(ltest_result)
+        logger.info("L test twinning analysis:\n" + l_test_table)
+
         if stats_summary:
             logger.info(stats_summary)
         if anom_amplitudes:
