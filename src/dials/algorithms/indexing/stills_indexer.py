@@ -563,11 +563,15 @@ class StillsIndexer(Indexer):
                         not self.params.stills.refine_candidates_with_known_symmetry
                         and self.params.known_symmetry.space_group is not None
                     ):
-                        (
-                            new_crystal,
-                            cb_op_to_primitive,
-                        ) = self._symmetry_handler.apply_symmetry(crystal_model)
-                        if new_crystal is None:
+                        # (
+                        #    new_crystal,
+                        #    cb_op_to_primitive,
+                        # ) = self._symmetry_handler.apply_symmetry(crystal_model)
+                        # check here is just for a consistent cell
+                        if not self.params.known_symmetry.space_group.group().is_compatible_unit_cell(
+                            crystal_model.get_unit_cell()
+                        ):
+                            # if new_crystal is None:
                             logger.info(
                                 "P1 refinement yielded model diverged from target, candidate %d",
                                 icm,
