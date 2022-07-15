@@ -83,6 +83,45 @@ def candidate_orientation_matrices(basis_vectors, max_combinations=None):
             yield model
 
 
+def filter_known_symmetry_using_handler(
+    crystal_models,
+    symmetry_handler,
+    relative_length_tolerance=0.1,
+    absolute_angle_tolerance=5,
+    max_delta=5,
+):
+    n_matched = 0
+    target_bravais_str = symmetry_handler.target_bravais_str
+    target_symmetry = symmetry_handler.target_symmetry_reference_setting
+    for model in crystal_models:
+        uc = model.get_unit_cell()
+        best_subgroup = find_matching_symmetry(
+            uc, None, max_delta=max_delta, target_bravais_str=target_bravais_str
+        )
+        if best_subgroup is not None:
+            if target_symmetry.unit_cell() is not None and not (
+                best_subgroup["best_subsym"]
+                .unit_cell()
+                .is_similar_to(
+                    target_symmetry.as_reference_setting().best_cell().unit_cell(),
+                    relative_length_tolerance=relative_length_tolerance,
+                    absolute_angle_tolerance=absolute_angle_tolerance,
+                )
+            ):
+                logger.debug(
+                    "Rejecting crystal model inconsistent with input symmetry:\n"
+                    f"  Unit cell: {str(model.get_unit_cell())}"
+                )
+                continue
+
+            n_matched += 1
+            yield model
+    if not n_matched:
+        logger.warning(
+            "No crystal models remaining after comparing with known symmetry"
+        )
+
+
 def filter_known_symmetry(
     crystal_models,
     target_symmetry,

@@ -364,9 +364,9 @@ class BasisVectorSearch(LatticeSearch):
         else:
             target_symmetry = None
         if target_symmetry is not None:
-            candidate_crystal_models = combinations.filter_known_symmetry(
+            candidate_crystal_models = combinations.filter_known_symmetry_using_handler(
                 candidate_crystal_models,
-                target_symmetry,
+                self._symmetry_handler,
                 relative_length_tolerance=self.params.known_symmetry.relative_length_tolerance,
                 absolute_angle_tolerance=self.params.known_symmetry.absolute_angle_tolerance,
                 max_delta=self.params.known_symmetry.max_delta,

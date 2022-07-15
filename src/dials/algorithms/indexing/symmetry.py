@@ -187,6 +187,8 @@ class SymmetryHandler:
         self.target_symmetry_reference_setting = None
         self.cb_op_inp_ref = None
         self.cb_op_inp_best = None
+        self.target_sg_prim_ref = None
+        self.target_bravais_str = ""
 
         target_space_group = space_group
         if target_space_group is not None:
@@ -256,7 +258,28 @@ class SymmetryHandler:
                 "Target symmetry (primitive cell):\n%s",
                 self.target_symmetry_primitive,
             )
+            self.target_sg_prim_ref = (
+                self.target_symmetry_primitive.space_group()
+                .info()
+                .reference_setting()
+                .group()
+            )
+            self.target_bravais_str = str(
+                bravais_lattice(group=self.target_sg_prim_ref)
+            )
         logger.debug("cb_op primitive->input: %s", self.cb_op_primitive_inp)
+
+    def is_consistent_symmetry(self, crystal_model):
+        uc = crystal_model.get_unit_cell()
+        # target_space_group = self.target_symmetry_primitive.space_group()
+        # target_sg_ref = target_space_group.info().reference_setting().group()
+
+        target_bravais_str = self.target_bravais_str
+        best = find_matching_symmetry(uc, None, target_bravais_str=target_bravais_str)
+        if best:
+            return True
+        else:
+            return False
 
     def apply_symmetry(self, crystal_model):
         """Apply symmetry constraints to a crystal model.
@@ -287,6 +310,7 @@ class SymmetryHandler:
         max_delta = self._max_delta
         items = iotbx_converter(crystal_model.get_unit_cell(), max_delta=max_delta)
         target_sg_ref = target_space_group.info().reference_setting().group()
+
         best_angular_difference = 1e8
 
         best_subgroup = None

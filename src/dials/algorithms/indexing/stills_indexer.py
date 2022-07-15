@@ -568,8 +568,8 @@ class StillsIndexer(Indexer):
                         #    cb_op_to_primitive,
                         # ) = self._symmetry_handler.apply_symmetry(crystal_model)
                         # check here is just for a consistent cell
-                        if not self.params.known_symmetry.space_group.group().is_compatible_unit_cell(
-                            crystal_model.get_unit_cell()
+                        if not self._symmetry_handler.is_consistent_symmetry(
+                            crystal_model
                         ):
                             # if new_crystal is None:
                             logger.info(
