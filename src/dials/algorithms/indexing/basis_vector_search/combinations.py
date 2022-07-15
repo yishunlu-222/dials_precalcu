@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 
+from cctbx import sgtbx
 from cctbx.sgtbx.bravais_types import bravais_lattice
 from dxtbx.model import Crystal
 from scitbx.array_family import flex
@@ -68,7 +69,11 @@ def candidate_orientation_matrices(basis_vectors, max_combinations=None):
             c = -c
         model = Crystal(a, b, c, space_group_symbol="P 1")
         uc = model.get_unit_cell()
-        cb_op_to_niggli = uc.change_of_basis_op_to_niggli_cell()
+
+        fast_red = uc.minimum_reduction()
+        cb_op_to_niggli = sgtbx.change_of_basis_op(
+            sgtbx.rt_mx(sgtbx.rot_mx(fast_red.r_inv(), 1))
+        ).inverse()
         model = model.change_basis(cb_op_to_niggli)
 
         uc = model.get_unit_cell()
