@@ -53,7 +53,6 @@ from dials.algorithms.integration.ssx.ellipsoid_integrate import (
 )
 from dials.algorithms.integration.ssx.ssx_integrate import (
     OutputAggregator,
-    SimpleIntegrator,
     generate_html_report,
 )
 from dials.algorithms.integration.ssx.stills_integrate import StillsIntegrator
@@ -63,7 +62,7 @@ from dials.util.options import ArgumentParser, flatten_experiments, flatten_refl
 from dials.util.version import dials_version
 
 try:
-    from typing import List, Type
+    from typing import List
 except ImportError:
     pass
 
@@ -167,9 +166,22 @@ loggers_to_disable_for_stills = loggers_to_disable + [
 ]
 
 
-def process_one_image(experiment, table, params, integrator_class):
+def process_one_image_ellipsoid_integrator(experiment, table, params):
+
     collect_data = params.output.html or params.output.json
-    integrator = integrator_class(params, collect_data)
+    integrator = EllipsoidIntegrator(params, collect_data)
+    try:
+        experiment, table, collector = integrator.run(experiment, table)
+    except RuntimeError as e:
+        logger.info(f"Processing failed due to error: {e}")
+        return (None, None, None)
+    else:
+        return experiment, table, collector
+
+
+def process_one_image_stills_integrator(experiment, table, params):
+    collect_data = params.output.html or params.output.json
+    integrator = StillsIntegrator(params, collect_data)
     try:
         experiment, table, collector = integrator.run(experiment, table)
     except RuntimeError as e:
@@ -208,10 +220,10 @@ def setup(reflections, params):
 
     # aggregate some output for json, html etc
     if params.algorithm == "ellipsoid":
-        process = EllipsoidIntegrator
+        process = process_one_image_ellipsoid_integrator
         aggregator = EllipsoidOutputAggregator()
     elif params.algorithm == "stills":
-        process = StillsIntegrator
+        process = process_one_image_stills_integrator
         aggregator = OutputAggregator()
     else:
         raise ValueError("Invalid algorithm choice")
@@ -232,7 +244,7 @@ def setup(reflections, params):
 
 @dataclass
 class InputToIntegrate:
-    integrator_class: Type[SimpleIntegrator]
+    process: Any
     experiment: Experiment
     table: flex.reflection_table
     params: Any
@@ -248,11 +260,10 @@ class IntegrationResult:
 
 
 def wrap_integrate_one(input_to_integrate: InputToIntegrate):
-    expt, refls, collector = process_one_image(
+    expt, refls, collector = input_to_integrate.process(
         input_to_integrate.experiment,
         input_to_integrate.table,
         input_to_integrate.params,
-        input_to_integrate.integrator_class,
     )
 
     result = IntegrationResult(expt, refls, collector, input_to_integrate.crystalno)
