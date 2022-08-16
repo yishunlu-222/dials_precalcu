@@ -60,7 +60,8 @@ phil_scope = parse(
       .type = str
       .help = "HTML filename for report of results."
   }
-
+  nproc = 1
+    .type = int
   nbins = 10
     .type = int(value_min=1)
     .help = "The number of resolution bins to use"

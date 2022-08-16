@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from math import floor, sqrt
 
 from cctbx import crystal, miller
@@ -154,6 +155,47 @@ def compute_cchalf_from_reflection_sums(reflection_sums, binner):
     return compute_mean_cchalf_in_bins(bin_data)
 
 
+@dataclass
+class InputToCChalf:
+    dataset: int
+    reflection_table: flex.reflection_table
+    reflection_sums: defaultdict(ReflectionSum)
+    binner: ResolutionBinner
+    dataset_indices: Any
+
+
+def calc_cchalfi(input_to_cchalf: InputToCChalf):
+
+    dataset = input_to_cchalf.dataset
+    reflection_table = input_to_cchalf.reflection_table
+    reflection_sums = input_to_cchalf.reflection_sums
+    binner = input_to_cchalf.binner
+    dataset_indices = input_to_cchalf.dataset_indices
+
+    index_lookup = defaultdict(list)
+    for i in dataset_indices:
+        index_lookup[reflection_table["miller_index"][i]].append(i)
+
+    # Loop through all the reflections and remove the contribution of
+    # reflections from the current dataset
+    dataset_reflection_sums = defaultdict(ReflectionSum)
+    for h in reflection_sums:
+        sum_x = reflection_sums[h].sum_x
+        sum_x2 = reflection_sums[h].sum_x2
+        n = reflection_sums[h].n
+        for i in index_lookup[h]:
+            sum_x -= reflection_table["intensity"][i]
+            sum_x2 -= reflection_table["intensity"][i] ** 2
+            n -= 1
+        if n > 1:
+            dataset_reflection_sums[h] = ReflectionSum(sum_x, sum_x2, n)
+
+    # Compute the CC 1/2 without the reflections from the current dataset
+    cchalf = compute_cchalf_from_reflection_sums(dataset_reflection_sums, binner)
+    logger.info("CC 1/2 excluding group %d: %.3f", dataset, 100 * cchalf)
+    return cchalf, dataset
+
+
 class PerGroupCChalfStatistics:
     def __init__(
         self,
@@ -163,6 +205,7 @@ class PerGroupCChalfStatistics:
         d_min=None,
         d_max=None,
         n_bins=10,
+        nproc=4,
     ):
         # here dataset is the sweep number, group is the group number for doing
         # the cc half analysis. May be the same as dataset if doing per dataset
@@ -176,6 +219,7 @@ class PerGroupCChalfStatistics:
         self.reflection_table = reflection_table
         self._cchalf_mean = None
         self._cchalf = None
+        self.nproc = nproc
 
         required = ["miller_index", "intensity", "variance", "dataset", "group"]
 
@@ -277,33 +321,30 @@ Summary of input data:
 
         # Compute CC1/2 minus each dataset
         cchalf_i = {}
-        for dataset in dataset_lookup:
 
-            # Find all observations from this dataset and create a lookup based on
-            # miller index
-            index_lookup = defaultdict(list)
-            for i in dataset_lookup[dataset]:
-                index_lookup[self.reflection_table["miller_index"][i]].append(i)
-
-            # Loop through all the reflections and remove the contribution of
-            # reflections from the current dataset
-            dataset_reflection_sums = defaultdict(ReflectionSum)
-            for h in self.reflection_sums:
-                sum_x = self.reflection_sums[h].sum_x
-                sum_x2 = self.reflection_sums[h].sum_x2
-                n = self.reflection_sums[h].n
-                for i in index_lookup[h]:
-                    sum_x -= self.reflection_table["intensity"][i]
-                    sum_x2 -= self.reflection_table["intensity"][i] ** 2
-                    n -= 1
-                dataset_reflection_sums[h] = ReflectionSum(sum_x, sum_x2, n)
-
-            # Compute the CC 1/2 without the reflections from the current dataset
-            cchalf = compute_cchalf_from_reflection_sums(
-                dataset_reflection_sums, self.binner
+        input_iterable = [
+            InputToCChalf(
+                dataset,
+                self.reflection_table,
+                self.reflection_sums,
+                self.binner,
+                indices,
             )
-            cchalf_i[dataset] = cchalf
-            logger.info("CC 1/2 excluding group %d: %.3f", dataset, 100 * cchalf)
+            for dataset, indices in dataset_lookup.items()
+        ]
+        from multiprocessing import Pool
+
+        # for iterable in input_iterable:
+        #    cchalf, dataset = calc_cchalfi(iterable)
+        #    cchalf_i[dataset] = cchalf
+        #    logger.info("CC 1/2 excluding group %d: %.3f", dataset, 100 * cchalf)
+
+        with Pool(self.nproc) as pool:
+            results = pool.map(calc_cchalfi, input_iterable)
+
+            for res in results:
+                cchalf, dataset = res[0], res[1]
+                cchalf_i[dataset] = cchalf
 
         return cchalf_i
 

@@ -504,6 +504,7 @@ Choose a suitable option for group_size to divide the dataset into multiple grou
             self.params.dmin,
             self.params.dmax,
             self.params.nbins,
+            self.params.nproc,
         )
 
         statistics.run()
