@@ -21,6 +21,7 @@ from jinja2 import ChoiceLoader, Environment, PackageLoader
 import libtbx.phil
 from dxtbx import flumpy
 from iotbx import phil
+from libtbx import Auto
 
 from dials.algorithms.scaling.combine_intensities import combine_intensities
 from dials.algorithms.scaling.error_model.engine import run_error_model_refinement
@@ -103,6 +104,19 @@ def refine_error_model(params, experiments, reflection_tables):
     Ih_table = IhTable(
         reflection_tables, space_group, additional_cols=["partiality"], anomalous=True
     )
+    if params.basic.expected_stats in (Auto, "auto"):
+        detectors = experiments.detectors()
+        gains = [p.get_gain() for d in detectors for p in d]
+        pnl_types = [p.get_type() for d in detectors for p in d]
+        counting_detector = True
+        if [g == 1.0 for g in gains].count(False) != 0:
+            counting_detector = False
+        if ["PAD" in t for t in pnl_types].count(False) != 0:
+            counting_detector = False
+        if counting_detector:
+            params.basic.expected_stats = "counting"
+        else:
+            params.basic.expected_stats = "integrating"
 
     # now do the error model refinement
     model = BasicErrorModel(basic_params=params.basic)

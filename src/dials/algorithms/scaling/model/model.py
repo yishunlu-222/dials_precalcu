@@ -225,6 +225,25 @@ n_modulation_bins = 20
 autos = [Auto, "auto", "Auto"]
 
 
+def detector_type(detectors) -> bool:
+    gains = [p.get_gain() for d in detectors for p in d]
+    pnl_types = [p.get_type() for d in detectors for p in d]
+    counting_detector = True
+    if [g == 1.0 for g in gains].count(False) != 0:
+        counting_detector = False
+    if ["PAD" in t for t in pnl_types].count(False) != 0:
+        counting_detector = False
+    return counting_detector
+
+
+def set_detector_type(experiment, configdict) -> None:
+    counting_detector = detector_type([experiment.detector])
+    if counting_detector:
+        configdict["detector_type"] = "counting"
+    else:
+        configdict["detector_type"] = "integrating"
+
+
 class ScalingModelBase:
     """Abstract base class for scaling models."""
 
@@ -351,6 +370,14 @@ class ScalingModelBase:
     def load_error_model(self, error_params):
         # load existing model if there, but use user-specified values if given
         new_model = None
+        if error_params.basic.expected_stats in (Auto, "auto"):
+            if "detector_type" in self._configdict:
+                error_params.basic.expected_stats = self._configdict["detector_type"]
+            else:
+                error_params.basic.expected_stats = (
+                    "counting"  # backwards compatibility
+                )
+                # for datasets processed before new options were implemented
         if (
             "error_model_type" in self._configdict
             and not error_params.reset_error_model
@@ -623,10 +650,12 @@ class DoseDecay(ScalingModelBase):
                 "parameters": flex.double(n_abs_param, 0.0),
                 "parameter_esds": None,
             }
+        set_detector_type(experiment, configdict)
 
         model = cls(parameters_dict, configdict)
         if params.correction.fix:
             model.fixed_components = params.correction.fix
+
         return model
 
     @classmethod
@@ -889,6 +918,8 @@ class PhysicalScalingModel(ScalingModelBase):
                 "parameters": flex.double(n_abs_param, 0.0),
                 "parameter_esds": None,
             }
+
+        set_detector_type(experiment, configdict)
 
         model = cls(parameters_dict, configdict)
         if params.correction.fix:
@@ -1223,6 +1254,8 @@ class ArrayScalingModel(ScalingModelBase):
                 "parameter_esds": None,
             }
 
+        set_detector_type(experiment, configdict)
+
         model = cls(parameters_dict, configdict)
         if params.correction.fix:
             model.fixed_components = params.correction.fix
@@ -1348,6 +1381,8 @@ class KBScalingModel(ScalingModelBase):
             "parameters": flex.double([1.0]),
             "parameter_esds": None,
         }
+
+        set_detector_type(experiment, configdict)
 
         model = cls(parameters_dict, configdict)
         if params.KB.correction.fix:

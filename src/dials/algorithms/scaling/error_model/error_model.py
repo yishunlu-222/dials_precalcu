@@ -47,6 +47,23 @@ phil_scope = phil.parse(
             .help = "Reflections with expected intensity above this value are to."
                     "be used in error model minimisation."
             .expert_level = 2
+        filter {
+            I_over_sigma = None
+                .type = float
+                .help = "Filter reflection groups that have an average I_over_sigma"
+                        "above this threshold for error model minimisation."
+                        "If None, then a filter on I_over_var > 0.85 is performed, to"
+                        "filter groups with a variance dominated by counting statistics"
+                .expert_level = 3
+        }
+        expected_stats = counting integrating *auto
+            .type = choice
+            .help = "If the expected stats are from a counting detector, then the"
+                    "min_Ih parameter will be used, to select an intensity range"
+                    "where the expected statistics are approximately normal."
+                    "If the expected stats are integrating, then no min_Ih filter"
+                    "is used. The auto option tries to determine this based on the"
+                    "detector name and gain."
         n_bins = 10
             .type = int
             .help = "The number of intensity bins to use for the error model optimisation."
@@ -407,6 +424,7 @@ class BasicErrorModel:
             self._active_parameters.append("a")
         if not basic_params.b:
             self._active_parameters.append("b")
+        assert self.params.expected_stats in {"counting", "integrating"}
 
     def configure_for_refinement(self, Ih_table, min_partiality=0.4):
         """
@@ -414,9 +432,29 @@ class BasicErrorModel:
 
         Raises: ValueError if insufficient reflections left after filtering.
         """
-        self.filtered_Ih_table = self.filter_unsuitable_reflections(
-            Ih_table, self.params, min_partiality
-        )
+        if self.params.filter.I_over_sigma:
+            I_over_var_threshold = None
+            I_over_sig_threshold = self.params.filter.I_over_sigma
+        else:
+            I_over_var_threshold = 0.85
+            I_over_sig_threshold = None
+
+        if self.params.expected_stats == "integrating":
+            self.filtered_Ih_table = self.filter_unsuitable_reflections(
+                Ih_table,
+                min_Ih=None,
+                min_partiality=min_partiality,
+                I_over_var_threshold=I_over_var_threshold,
+                I_over_sig_threshold=I_over_sig_threshold,
+            )
+        else:  # counting
+            self.filtered_Ih_table = self.filter_unsuitable_reflections(
+                Ih_table,
+                min_Ih=self.params.min_Ih,
+                min_partiality=min_partiality,
+                I_over_var_threshold=I_over_var_threshold,
+                I_over_sig_threshold=I_over_sig_threshold,
+            )
         # always want binning info so that can calc for output.
         self.binner = ErrorModelBinner(
             self.filtered_Ih_table, self.min_reflections_required, self.params.n_bins
@@ -455,13 +493,22 @@ class BasicErrorModel:
         return self.filtered_Ih_table.size
 
     @classmethod
-    def filter_unsuitable_reflections(cls, Ih_table, error_params, min_partiality):
+    def filter_unsuitable_reflections(
+        cls,
+        Ih_table,
+        min_Ih,
+        min_partiality,
+        I_over_var_threshold,
+        I_over_sig_threshold,
+    ):
         """Filter suitable reflections for minimisation."""
         return filter_unsuitable_reflections(
             Ih_table,
-            min_Ih=error_params.min_Ih,
+            min_Ih=min_Ih,
             min_partiality=min_partiality,
             min_reflections_required=cls.min_reflections_required,
+            I_over_var_threshold=I_over_var_threshold,
+            I_over_sig_threshold=I_over_sig_threshold,
         )
 
     def calculate_sorted_deviations(self, parameters):
@@ -571,7 +618,13 @@ class BasicErrorModel:
 
 
 def filter_unsuitable_reflections(
-    Ih_table, min_Ih, min_partiality, min_reflections_required
+    Ih_table,
+    min_Ih=25.0,
+    min_partiality=0.4,
+    min_reflections_required=250,
+    I_over_var_threshold=0.85,
+    I_over_sig_threshold=None,
+    # min_raw_intensity=1.0,
 ):
     """
     Choose reflection groups with n_h > 1, as these have deltas of zero by
@@ -583,34 +636,63 @@ def filter_unsuitable_reflections(
         sel = Ih_table.Ih_table["partiality"].to_numpy() > min_partiality
         Ih_table = Ih_table.select(sel)
 
+    """sel = Ih_table.intensities >= min_raw_intensity  # 0.001
+    logger.debug(
+        f"Filtering {sel.size - np.sum(sel)} / {sel.size} reflections with raw intensities < {min_raw_intensity}"
+    )
+    Ih_table = Ih_table.select(sel)"""
+
     n = Ih_table.size
-    sum_I_over_var = Ih_table.sum_in_groups(Ih_table.intensities / Ih_table.variances)
     n_per_group = Ih_table.sum_in_groups(np.full(n, 1))
-    avg_I_over_var = sum_I_over_var / n_per_group
-    sel = avg_I_over_var > 0.85
-    Ih_table = Ih_table.select_on_groups(sel)
+
+    if I_over_sig_threshold:
+        sum_I_over_sig = Ih_table.sum_in_groups(
+            Ih_table.intensities / (Ih_table.variances**0.5)
+        )
+        avg_I_over_sig = sum_I_over_sig / n_per_group
+        sel = avg_I_over_sig > I_over_sig_threshold
+        logger.debug(
+            f"Filtering {sel.size - np.sum(sel)} / {sel.size} groups with avg_I_over_sig <= {I_over_sig_threshold}"
+        )
+        Ih_table = Ih_table.select_on_groups(sel)
+    elif I_over_var_threshold:
+        # don't want to include weaker reflections where the background adds
+        # significantly to the variances, as these would no longer be normally
+        # distributed and skew the fit.
+        sum_I_over_var = Ih_table.sum_in_groups(
+            Ih_table.intensities / Ih_table.variances
+        )
+        avg_I_over_var = sum_I_over_var / n_per_group
+        sel = avg_I_over_var > I_over_var_threshold
+        logger.debug(
+            f"Filtering {sel.size - np.sum(sel)} / {sel.size} groups with avg_I_over_var <= {I_over_var_threshold}"
+        )
+        Ih_table = Ih_table.select_on_groups(sel)
+
+    if min_Ih:
+        scaled_Ih = Ih_table.Ih_values * Ih_table.inverse_scale_factors
+        # need a scaled min_Ih, where can reasonably expect norm distribution
+        # (use min_Ih=25 by default, sigma ~ 5)
+        sel = scaled_Ih >= min_Ih
+        logger.debug(
+            f"Filtering {sel.size - np.sum(sel)} / {sel.size} reflections with scaled_Ih < min_Ih ({min_Ih})"
+        )
+        Ih_table = Ih_table.select(sel)
+
     n_h = Ih_table.calc_nh()
-    scaled_Ih = Ih_table.Ih_values * Ih_table.inverse_scale_factors
-    # need a scaled min_Ih, where can reasonably expect norm distribution
-    # (use min_Ih=25 by default, sigma ~ 5)
-    sel2 = scaled_Ih > min_Ih
-    # can't calculate a true deviation for groups of 1
-    sel3 = n_h > 1.0
-    sel4 = Ih_table.intensities > 0.001
-    # don't want to include weaker reflections where the background adds
-    # significantly to the variances, as these would no longer be normally
-    # distributed and skew the fit.
-    Ih_table = Ih_table.select(sel2 & sel3 & sel4)
+    # now make sure any left also have n > 1
+    sel = n_h > 1.0
+    logger.debug(
+        f"Filtering {sel.size - np.sum(sel)} / {sel.size} reflections with multiplicity of 1"
+    )
+    Ih_table = Ih_table.select(sel)
+
     n = Ih_table.size
     if n < min_reflections_required:
         raise ValueError(
             "Insufficient reflections (%s < %s) to perform error modelling."
             % (n, min_reflections_required)
         )
-    n_h = Ih_table.calc_nh()
-    # now make sure any left also have n > 1
-    sel = n_h > 1.0
-    Ih_table = Ih_table.select(sel)
 
     #  Filter groups with abnormally high internal variances.
     # For a reasonable quality dataset, if b=0.04, a=1.25, then for large Imax,
