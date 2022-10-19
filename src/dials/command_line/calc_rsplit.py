@@ -61,6 +61,11 @@ phil_scope = phil.parse(
     """
     n_bins = 10
        .type = int
+    d_min= None
+       .type = float
+    d_max= None
+       .type = float
+
 """
 )
 
@@ -95,6 +100,10 @@ def run(args=None, phil: phil.scope = phil_scope):
         outlier_rejection_after_filter=False,
         partiality_threshold=0.4,
     )[0]
+    if params.d_min or params.d_max:
+        scaled_array = scaled_array.resolution_filter(
+            d_min=params.d_min, d_max=params.d_max
+        )
 
     seed = 0
 
