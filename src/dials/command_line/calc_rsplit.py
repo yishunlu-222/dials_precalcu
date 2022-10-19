@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import sys
 
 from cctbx import miller
 from cctbx.miller import binned_data
-from dxtbx.model import ExperimentList
-from dxtbx.serialize import load
 
-from dials.algorithms.scaling.scaling_library import scaled_data_as_miller_array
 from dials.array_family import flex
+from dials.util import tabulate
+from dials.util.filter_reflections import filtered_arrays_from_experiments_reflections
 from dials.util.options import ArgumentParser, reflections_and_experiments_from_files
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,12 @@ def r_split(this, other, assume_index_matching=False, use_binning=False):
 
 from libtbx import phil
 
-phil_scope = phil.parse("")
+phil_scope = phil.parse(
+    """
+    n_bins = 10
+       .type = int
+"""
+)
 
 
 def run(args=None, phil: phil.scope = phil_scope):
@@ -79,23 +84,9 @@ def run(args=None, phil: phil.scope = phil_scope):
         params.input.reflections, params.input.experiments
     )
 
-    """scaled_tables = []
-    scaled_expts = ExperimentList([])
-    for fname in ["eclair/scaled_0", "eclair/scaled_1",
-        "almond00002/scaled_0", "almond00002/scaled_1", "almond00002/scaled_2",
-        "almond00003/scaled_0"]:
-        print(f"loading {fname}")
-        expts = load.experiment_list(fname + ".expt", check_format=False)
-        refls = flex.reflection_table.from_file(fname + ".refl")
-        scaled_tables.append(refls)
-        scaled_expts.extend(expts)"""
     scaled_table = flex.reflection_table.concat(reflections)
     scaled_table = scaled_table.select(
         scaled_table.get_flags(scaled_table.flags.scaled)
-    )
-
-    from dials.util.filter_reflections import (
-        filtered_arrays_from_experiments_reflections,
     )
 
     scaled_array = filtered_arrays_from_experiments_reflections(
@@ -116,9 +107,6 @@ def run(args=None, phil: phil.scope = phil_scope):
         seed=seed,
     )
 
-    data_1 = split_datasets.data_1
-    data_2 = split_datasets.data_2
-
     m1 = miller.array(
         miller_set=miller.set(scaled_array.crystal_symmetry(), split_datasets.indices),
         data=split_datasets.data_1,
@@ -127,14 +115,27 @@ def run(args=None, phil: phil.scope = phil_scope):
         miller_set=miller.set(scaled_array.crystal_symmetry(), split_datasets.indices),
         data=split_datasets.data_2,
     )
-    n_bins = 10
-    m1.setup_binner_counting_sorted(n_bins=n_bins)
-    m2.setup_binner_counting_sorted(n_bins=n_bins)
+    print("Calculating r-split")
+    m1_copy = copy.deepcopy(m1)
+    m2_copy = copy.deepcopy(m2)
 
+    rsplit_overall = r_split(
+        m1_copy, m2_copy, assume_index_matching=True, use_binning=False
+    )
+    print(f"Overall r-split: {rsplit_overall:.5f}")
+
+    m1.setup_binner_counting_sorted(n_bins=params.n_bins)
+    m2.setup_binner_counting_sorted(n_bins=params.n_bins)
     data = r_split(m1, m2, assume_index_matching=True, use_binning=True)
-    # print(data.as_simple_table())
-    print(list(data.data))  #
-    # print(data.show())
+
+    header = ["Resolution range", "r-split"]
+    rows = []
+
+    for i_bin, rsplit in zip(list(m1.binner().range_all())[1:-1], data.data[1:-1]):
+        d_max_bin, d_min_bin = m1.binner().bin_d_range(i_bin)
+        rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
+    rows.append(["Overall", f"{rsplit_overall:.5f}"])
+    print(tabulate(rows, header))
 
 
 if __name__ == "__main__":
