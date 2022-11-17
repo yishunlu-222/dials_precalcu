@@ -120,27 +120,50 @@ def index_one(
 ) -> Union[Tuple[ExperimentList, flex.reflection_table], Tuple[bool, bool]]:
 
     elist = ExperimentList([experiment])
-    for method in method_list:
-        params.indexing.method = method
-        idxr = Indexer.from_parameters(
-            reflection_table,
-            elist,
-            params=params,
-            known_crystal_models=known_crystal_models,
+    if params.indexing.stills.reflection_subsampling.enable:
+        subsets = range(
+            params.indexing.stills.reflection_subsampling.step_start,
+            params.indexing.stills.reflection_subsampling.step_stop
+            - params.indexing.stills.reflection_subsampling.step_size,
+            -params.indexing.stills.reflection_subsampling.step_size,
         )
-        try:
-            idxr.index()
-        except (DialsIndexError, AssertionError) as e:
-            logger.info(
-                f"Image {image_no+1}: Failed to index with {method} method, error: {e}"
-            )
-            if method == method_list[-1]:
-                return None, None
+    else:
+        subsets = [100]
+    for i in subsets:
+        if i != 100:
+            reflections_to_use = reflection_table.select(
+                flex.random_permutation(len(reflection_table))
+            )[: int(len(reflection_table) * i / 100)]
         else:
-            logger.info(
-                f"Image {image_no+1}: Indexed {idxr.refined_reflections.size()}/{reflection_table.size()} spots with {method} method."
+            reflections_to_use = reflection_table
+        for method in method_list:
+            params.indexing.method = method
+            idxr = Indexer.from_parameters(
+                reflections_to_use,
+                elist,
+                params=params,
+                known_crystal_models=known_crystal_models,
             )
-            return idxr.refined_experiments, idxr.refined_reflections
+            try:
+                idxr.index()
+            except (DialsIndexError, AssertionError) as e:
+                subsetmsg = (
+                    f" (using subset of {i}% of reflections)" if i != 100 else ""
+                )
+                logger.info(
+                    f"Image {image_no+1}: Failed to index with {method} method{subsetmsg}, error: {e}"
+                )
+                # if method == method_list[-1]:
+                #    return None, None
+            else:
+                subsetmsg = (
+                    f" (using subset of {i}% of reflections)" if i != 100 else ""
+                )
+                logger.info(
+                    f"Image {image_no+1}: Indexed {idxr.refined_reflections.size()}/{reflection_table.size()} spots with {method} method{subsetmsg}."
+                )
+                return idxr.refined_experiments, idxr.refined_reflections
+    return None, None
 
 
 def wrap_index_one(input_to_index: InputToIndex) -> IndexingResult:

@@ -289,6 +289,28 @@ indexing {
     set_mosaic_half_deg_value = None
       .type=float
       .help=If specified, will set the mosaic half degree value and override the value determined from nave refinement
+    reflection_subsampling {
+        enable  = False
+          .type = bool
+          .help = Enable random subsampling of reflections during indexing. Attempts to index    \
+                  will be repeated with random subsampling of spotfinder spots, starting at      \
+                  step_start percent of total spots, repeating n_attempts_per_step times per step,     \
+                  and decreasing by step_size percent until step_stop percent is reached. With the defaults, \
+                  26 total indexing attempts will be made, randomly subsampling from 100percent to     \
+                  50 percent by 2 percent steps, one attempt per step.
+        step_start = 100
+          .type = int
+          .help = What percent of reflections to start with
+        step_stop = 50
+          .type = int
+          .help = What percent of reflections to end with
+        step_size = 2
+          .type = int
+          .help = What percent of reflections to decrease by per step
+        n_attempts_per_step = 1
+          .type = int
+          .help = How many attempts to make at each step
+    }
   }
 }
 """
