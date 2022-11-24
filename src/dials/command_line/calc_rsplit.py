@@ -68,6 +68,64 @@ def r_split(this, other, assume_index_matching=False, use_binning=False, weighte
     return binned_data(binner=this.binner(), data=results, data_fmt="%7.4f")
 
 
+def weighted_cchalf(
+    this, other, assume_index_matching=False, use_binning=False, weighted=True
+):
+    if not use_binning:
+        assert other.indices().size() == this.indices().size()
+        if this.data().size() == 0:
+            return None
+
+        if assume_index_matching:
+            (o, c) = (this, other)
+        else:
+            (o, c) = this.common_sets(other=other, assert_no_singles=True)
+
+        # The case where the denominator is less or equal to zero is
+        # pathological and should never arise in practice.
+        if weighted:
+            assert len(o.sigmas())
+            assert len(c.sigmas())
+            n = len(o.data())
+            v_o = o.sigmas() ** 2
+            v_c = c.sigmas() ** 2
+            var_w = v_o + v_c
+            joint_w = 1.0 / var_w
+            sumjw = flex.sum(joint_w)
+            norm_jw = joint_w / sumjw
+            xbar = flex.sum(o.data() * norm_jw)
+            ybar = flex.sum(c.data() * norm_jw)
+            sxy = flex.sum((o.data() - xbar) * (c.data() - ybar) * norm_jw)
+
+            sx = flex.sum((o.data() - xbar) ** 2 * norm_jw)
+            sy = flex.sum((c.data() - ybar) ** 2 * norm_jw)
+
+            return sxy / ((sx * sy) ** 0.5)
+        else:
+            n = len(o.data())
+            xbar = flex.sum(o.data()) / n
+            ybar = flex.sum(c.data()) / n
+            sxy = flex.sum((o.data() - xbar) * (c.data() - ybar))
+            sx = flex.sum((o.data() - xbar) ** 2)
+            sy = flex.sum((c.data() - ybar) ** 2)
+
+            return sxy / ((sx * sy) ** 0.5)
+    assert this.binner is not None
+    results = []
+    for i_bin in this.binner().range_all():
+        sel = this.binner().selection(i_bin)
+        results.append(
+            weighted_cchalf(
+                this.select(sel),
+                other.select(sel),
+                assume_index_matching=assume_index_matching,
+                use_binning=False,
+                weighted=weighted,
+            )
+        )
+    return binned_data(binner=this.binner(), data=results, data_fmt="%7.4f")
+
+
 from libtbx import phil
 
 phil_scope = phil.parse(
@@ -107,6 +165,11 @@ def run(args=None, phil: phil.scope = phil_scope):
     scaled_table = scaled_table.select(
         scaled_table.get_flags(scaled_table.flags.scaled)
     )
+    from dials.algorithms.scaling.combine_intensities import map_indices_to_asu
+
+    scaled_table["miller_index"] = map_indices_to_asu(
+        scaled_table["miller_index"], scaled_expts[0].crystal.get_space_group()
+    )
 
     scaled_array = filtered_arrays_from_experiments_reflections(
         scaled_expts,
@@ -136,7 +199,9 @@ def run(args=None, phil: phil.scope = phil_scope):
     sig_1 = data.get_sigma1()
     sig_2 = data.get_sigma2()
     indices = data.get_indices()
-
+    # import matplotlib.pyplot as plt
+    # plt.errorbar(list(I_1), list(I_2), xerr=list(sig_1), yerr=list(sig_2), fmt='none')
+    # plt.show()
     m1 = miller.array(
         miller_set=miller.set(scaled_array.crystal_symmetry(), indices),
         data=I_1,
@@ -154,10 +219,14 @@ def run(args=None, phil: phil.scope = phil_scope):
     rsplit_overall = r_split(
         m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=True
     )
+    cchalf_overall = weighted_cchalf(
+        m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=True
+    )
     print(f"Overall weighted r-split: {rsplit_overall:.5f}")
+    print(f"Overall weighted cc-half: {cchalf_overall:.5f}")
 
-    m1.setup_binner_counting_sorted(n_bins=params.n_bins)
-    m2.setup_binner_counting_sorted(n_bins=params.n_bins)
+    m1.setup_binner(n_bins=params.n_bins)
+    m2.setup_binner(n_bins=params.n_bins)
     data = r_split(m1, m2, assume_index_matching=True, use_binning=True)
 
     header = ["Resolution range", "weighted r-split"]
@@ -167,6 +236,16 @@ def run(args=None, phil: phil.scope = phil_scope):
         d_max_bin, d_min_bin = m1.binner().bin_d_range(i_bin)
         rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
     rows.append(["Overall", f"{rsplit_overall:.5f}"])
+    print(tabulate(rows, header))
+    data = weighted_cchalf(m1, m2, assume_index_matching=True, use_binning=True)
+
+    header = ["Resolution range", "weighted cc-half"]
+    rows = []
+
+    for i_bin, rsplit in zip(list(m1.binner().range_all())[1:-1], data.data[1:-1]):
+        d_max_bin, d_min_bin = m1.binner().bin_d_range(i_bin)
+        rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
+    rows.append(["Overall", f"{cchalf_overall:.5f}"])
     print(tabulate(rows, header))
 
     split_datasets = miller.split_unmerged(
@@ -192,9 +271,13 @@ def run(args=None, phil: phil.scope = phil_scope):
         m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=False
     )
     print(f"Overall r-split: {rsplit_overall:.5f}")
+    cchalf_overall = weighted_cchalf(
+        m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=False
+    )
+    print(f"Overall cc-half: {cchalf_overall:.5f}")
 
-    m1.setup_binner_counting_sorted(n_bins=params.n_bins)
-    m2.setup_binner_counting_sorted(n_bins=params.n_bins)
+    m1.setup_binner(n_bins=params.n_bins)
+    m2.setup_binner(n_bins=params.n_bins)
     data = r_split(m1, m2, assume_index_matching=True, use_binning=True, weighted=False)
 
     header = ["Resolution range", "r-split"]
@@ -204,6 +287,18 @@ def run(args=None, phil: phil.scope = phil_scope):
         d_max_bin, d_min_bin = m1.binner().bin_d_range(i_bin)
         rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
     rows.append(["Overall", f"{rsplit_overall:.5f}"])
+    print(tabulate(rows, header))
+    data = weighted_cchalf(
+        m1, m2, assume_index_matching=True, use_binning=True, weighted=False
+    )
+
+    header = ["Resolution range", "cc-half"]
+    rows = []
+
+    for i_bin, rsplit in zip(list(m1.binner().range_all())[1:-1], data.data[1:-1]):
+        d_max_bin, d_min_bin = m1.binner().bin_d_range(i_bin)
+        rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
+    rows.append(["Overall", f"{cchalf_overall:.5f}"])
     print(tabulate(rows, header))
 
 
