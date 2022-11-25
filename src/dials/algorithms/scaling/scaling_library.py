@@ -415,6 +415,7 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         )
         m1.setup_binner(n_bins=n_bins)
         m2.setup_binner(n_bins=n_bins)
+        self.weighted_binner = m1.binner()
         if stills:
             # now use i_obs to calc rsplit
             from dials.command_line.calc_rsplit import r_split
