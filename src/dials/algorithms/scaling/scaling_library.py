@@ -372,8 +372,82 @@ def determine_best_unit_cell(experiments):
     return best_unit_cell
 
 
+class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
+    def __init__(self, *args, stills=False, weighted=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.weighted_r_split = None
+        self.unweighted_r_split = None
+        self.weighted_cc_half = None
+        self.weighted_r_split_binned = None
+        self.unweighted_r_split_binned = None
+        self.weighted_cc_half_binned = None
+        if not (stills or weighted):
+            return
+        i_obs = kwargs.get("i_obs")
+        n_bins = kwargs.get("n_bins", 20)
+        if not i_obs:
+            return
+        i_obs = i_obs.map_to_asu()
+        i_obs = i_obs.sort("packed_indices")
+        from dials_scaling_ext import weighted_split_unmerged
+
+        seed = 0
+        data = weighted_split_unmerged(
+            unmerged_indices=i_obs.indices(),
+            unmerged_data=i_obs.data(),
+            unmerged_sigmas=i_obs.sigmas(),
+            seed=seed,
+        ).data()
+        I_1 = data.get_data1()
+        I_2 = data.get_data2()
+        sig_1 = data.get_sigma1()
+        sig_2 = data.get_sigma2()
+        indices = data.get_indices()
+        m1 = miller.array(
+            miller_set=miller.set(i_obs.crystal_symmetry(), indices),
+            data=I_1,
+            sigmas=sig_1,
+        )
+        m2 = miller.array(
+            miller_set=miller.set(i_obs.crystal_symmetry(), indices),
+            data=I_2,
+            sigmas=sig_2,
+        )
+        m1.setup_binner(n_bins=n_bins)
+        m2.setup_binner(n_bins=n_bins)
+        if stills:
+            # now use i_obs to calc rsplit
+            from dials.command_line.calc_rsplit import r_split
+
+            self.weighted_r_split = r_split(
+                m1, m2, assume_index_matching=True, use_binning=False, weighted=True
+            )
+            self.unweighted_r_split = r_split(
+                m1, m2, assume_index_matching=True, use_binning=False, weighted=False
+            )
+            self.weighted_r_split_binned = r_split(
+                m1, m2, assume_index_matching=True, use_binning=True, weighted=True
+            ).data[1:-1]
+            self.unweighted_r_split_binned = r_split(
+                m1, m2, assume_index_matching=True, use_binning=True, weighted=False
+            ).data[1:-1]
+        if weighted:
+            from dials.command_line.calc_rsplit import weighted_cchalf
+
+            self.weighted_cc_half = weighted_cchalf(
+                m1, m2, assume_index_matching=True, use_binning=False, weighted=True
+            )
+            self.weighted_cc_half_binned = weighted_cchalf(
+                m1, m2, assume_index_matching=True, use_binning=True, weighted=True
+            ).data[1:-1]
+
+
 def merging_stats_from_scaled_array(
-    scaled_miller_array, n_bins=20, use_internal_variance=False, anomalous=True
+    scaled_miller_array,
+    n_bins=20,
+    use_internal_variance=False,
+    anomalous=True,
+    extra_stats=False,
 ):
     """Calculate the normal and anomalous merging statistics."""
 
@@ -382,8 +456,11 @@ def merging_stats_from_scaled_array(
             "Dataset contains no equivalent reflections, merging statistics "
             "cannot be calculated."
         )
+    stills, weighted = False, False
+    if extra_stats:
+        stills, weighted = True, True
     try:
-        result = iotbx.merging_statistics.dataset_statistics(
+        result = ExtendedDatasetStatistics(
             i_obs=scaled_miller_array,
             n_bins=n_bins,
             anomalous=False,
@@ -391,6 +468,8 @@ def merging_stats_from_scaled_array(
             eliminate_sys_absent=False,
             use_internal_variance=use_internal_variance,
             cc_one_half_significance_level=0.01,
+            stills=stills,
+            weighted=weighted,
         )
     except (RuntimeError, Sorry) as e:
         raise DialsMergingStatisticsError(
@@ -411,7 +490,7 @@ def merging_stats_from_scaled_array(
             )
         else:
             try:
-                anom_result = iotbx.merging_statistics.dataset_statistics(
+                anom_result = ExtendedDatasetStatistics(
                     i_obs=intensities_anom,
                     n_bins=n_bins,
                     anomalous=True,
@@ -427,7 +506,6 @@ def merging_stats_from_scaled_array(
                     e,
                     exc_info=True,
                 )
-
     return result, anom_result
 
 
