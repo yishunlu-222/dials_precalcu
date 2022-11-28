@@ -194,6 +194,7 @@ formats = {
     "Rmeas(I+/-)": "%7.3f",
     "Rpim(I)": "%7.3f",
     "Rpim(I+/-)": "%7.3f",
+    "Rsplit": "%7.3f",
     "CC half": "%7.3f",
     "Rsplit(\u03C3-weighted)": "%7.3f",
     "CC half(\u03C3-weighted)": "%7.3f",
@@ -288,17 +289,28 @@ def table_1_stats(
         "Total unique": "n_uniq",
     }
     extra_key_to_var = {}
+    if merging_statistics.unweighted_r_split:
+        extra_key_to_var.update(
+            {
+                "Rsplit": {
+                    "overall": "unweighted_r_split",
+                    "binned": "unweighted_r_split_binned",
+                }
+            }
+        )
     if merging_statistics.weighted_r_split:
-        extra_key_to_var = {
-            "Rsplit(\u03C3-weighted)": {
-                "overall": "weighted_r_split",
-                "binned": "weighted_r_split_binned",
-            },
-            "CC half(\u03C3-weighted)": {
-                "overall": "weighted_cc_half",
-                "binned": "weighted_cc_half_binned",
-            },
-        }
+        extra_key_to_var.update(
+            {
+                "Rsplit(\u03C3-weighted)": {
+                    "overall": "weighted_r_split",
+                    "binned": "weighted_r_split_binned",
+                },
+                "CC half(\u03C3-weighted)": {
+                    "overall": "weighted_cc_half",
+                    "binned": "weighted_cc_half_binned",
+                },
+            }
+        )
 
     anom_key_to_var = {
         "Rmerge(I+/-)": "r_merge",
