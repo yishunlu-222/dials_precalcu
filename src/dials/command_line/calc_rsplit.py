@@ -74,7 +74,7 @@ def weighted_cchalf(
     if not use_binning:
         assert other.indices().size() == this.indices().size()
         if this.data().size() == 0:
-            return None
+            return None, None
 
         if assume_index_matching:
             (o, c) = (this, other)
@@ -99,8 +99,10 @@ def weighted_cchalf(
 
             sx = flex.sum((o.data() - xbar) ** 2 * norm_jw)
             sy = flex.sum((c.data() - ybar) ** 2 * norm_jw)
+            # what is neff? neff = 1/V2
+            V2 = flex.sum(norm_jw**2)
 
-            return sxy / ((sx * sy) ** 0.5)
+            return (sxy / ((sx * sy) ** 0.5), 1.0 / V2)
         else:
             n = len(o.data())
             xbar = flex.sum(o.data()) / n
@@ -109,21 +111,49 @@ def weighted_cchalf(
             sx = flex.sum((o.data() - xbar) ** 2)
             sy = flex.sum((c.data() - ybar) ** 2)
 
-            return sxy / ((sx * sy) ** 0.5)
+            return (sxy / ((sx * sy) ** 0.5), n)
     assert this.binner is not None
     results = []
+    n_eff = []
     for i_bin in this.binner().range_all():
         sel = this.binner().selection(i_bin)
-        results.append(
-            weighted_cchalf(
-                this.select(sel),
-                other.select(sel),
-                assume_index_matching=assume_index_matching,
-                use_binning=False,
-                weighted=weighted,
-            )
+        cchalf, neff = weighted_cchalf(
+            this.select(sel),
+            other.select(sel),
+            assume_index_matching=assume_index_matching,
+            use_binning=False,
+            weighted=weighted,
         )
-    return binned_data(binner=this.binner(), data=results, data_fmt="%7.4f")
+        results.append(cchalf)
+        n_eff.append(neff)
+    return binned_data(binner=this.binner(), data=results, data_fmt="%7.4f"), n_eff
+
+
+def compute_cc_significance(r, n, p):
+    # https://en.wikipedia.org/wiki/Pearson_product-moment_correlation_coefficient#Testing_using_Student.27s_t-distribution
+    if r == -1 or n <= 2:
+        significance = False
+        critical_value = 0
+    else:
+        from scitbx.math import distributions
+
+        dist = distributions.students_t_distribution(n - 2)
+        t = dist.quantile(1 - p)
+        critical_value = t / math.sqrt(n - 2 + t**2)
+        significance = r > critical_value
+    return significance, critical_value
+
+
+def compute_cc_significance_levels(cchalfs, neffs, cc_one_half_significance_level=0.01):
+    significances = []
+    critical_vals = []
+    for cc, n in zip(cchalfs, neffs):
+        s, c = compute_cc_significance(
+            cc, int(math.ceil(n)), cc_one_half_significance_level
+        )
+        significances.append(s)
+        critical_vals.append(c)
+    return significances, critical_vals
 
 
 from libtbx import phil
@@ -219,7 +249,7 @@ def run(args=None, phil: phil.scope = phil_scope):
     rsplit_overall = r_split(
         m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=True
     )
-    cchalf_overall = weighted_cchalf(
+    cchalf_overall, neff = weighted_cchalf(
         m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=True
     )
     print(f"Overall weighted r-split: {rsplit_overall:.5f}")
@@ -237,7 +267,7 @@ def run(args=None, phil: phil.scope = phil_scope):
         rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
     rows.append(["Overall", f"{rsplit_overall:.5f}"])
     print(tabulate(rows, header))
-    data = weighted_cchalf(m1, m2, assume_index_matching=True, use_binning=True)
+    data, neff = weighted_cchalf(m1, m2, assume_index_matching=True, use_binning=True)
 
     header = ["Resolution range", "weighted cc-half"]
     rows = []
@@ -271,7 +301,7 @@ def run(args=None, phil: phil.scope = phil_scope):
         m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=False
     )
     print(f"Overall r-split: {rsplit_overall:.5f}")
-    cchalf_overall = weighted_cchalf(
+    cchalf_overall, neff = weighted_cchalf(
         m1_copy, m2_copy, assume_index_matching=True, use_binning=False, weighted=False
     )
     print(f"Overall cc-half: {cchalf_overall:.5f}")
@@ -288,7 +318,7 @@ def run(args=None, phil: phil.scope = phil_scope):
         rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
     rows.append(["Overall", f"{rsplit_overall:.5f}"])
     print(tabulate(rows, header))
-    data = weighted_cchalf(
+    data, neff = weighted_cchalf(
         m1, m2, assume_index_matching=True, use_binning=True, weighted=False
     )
 

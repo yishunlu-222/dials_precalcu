@@ -20,6 +20,8 @@ from mmtbx.scaling.absolute_scaling import expected_intensity, scattering_inform
 from mmtbx.scaling.matthews import matthews_rupp
 from scitbx.array_family import flex
 
+from dials.algorithms.scaling.scaling_library import ExtendedDatasetStatistics
+
 logger = logging.getLogger("dials")
 
 
@@ -603,7 +605,10 @@ class ResolutionPlotsAndStats:
     """
 
     def __init__(
-        self, dataset_statistics, anomalous_dataset_statistics, is_centric=False
+        self,
+        dataset_statistics: ExtendedDatasetStatistics,
+        anomalous_dataset_statistics,
+        is_centric=False,
     ):
         self.dataset_statistics = dataset_statistics
         self.anomalous_dataset_statistics = anomalous_dataset_statistics
@@ -623,6 +628,84 @@ class ResolutionPlotsAndStats:
         d.update(self.completeness_plot())
         d.update(self.multiplicity_vs_resolution_plot())
         d.update(self.r_pim_plot())
+        d.update(self.weighted_stats_plot())
+        return d
+
+    def weighted_stats_plot(self):
+        d = {}
+        if self.dataset_statistics.weighted_cc_half_binned:
+            d_star_sq_bins = []
+            from dials.command_line.calc_rsplit import compute_cc_significance_levels
+
+            s, critical_vals = compute_cc_significance_levels(
+                self.dataset_statistics.weighted_cc_half_binned,
+                self.dataset_statistics.neff_binned,
+            )
+            for bin in self.dataset_statistics.weighted_binner.range_used():
+                d_max_min = self.dataset_statistics.weighted_binner.bin_d_range(bin)
+
+                d_star_sq_bins.append(
+                    0.5
+                    * (
+                        uctbx.d_as_d_star_sq(d_max_min[0])
+                        + uctbx.d_as_d_star_sq(d_max_min[1])
+                    )
+                )
+            d.update(
+                {
+                    "cc_one_half_weighted": cc_half_plot(
+                        d_star_sq=d_star_sq_bins,
+                        cc_half=self.dataset_statistics.weighted_cc_half_binned,
+                        cc_half_fit=None,
+                        d_min=None,
+                        cc_half_critical_values=critical_vals,
+                    )
+                }
+            )
+            d["cc_one_half_weighted"]["layout"][
+                "title"
+            ] = "CC<sub>½</sub>(\u03C3-weighted) vs resolution"
+        if self.dataset_statistics.weighted_r_split_binned:
+            d_star_sq_bins = []
+            for bin in self.dataset_statistics.weighted_binner.range_used():
+                d_max_min = self.dataset_statistics.weighted_binner.bin_d_range(bin)
+                d_star_sq_bins.append(
+                    0.5
+                    * (
+                        uctbx.d_as_d_star_sq(d_max_min[0])
+                        + uctbx.d_as_d_star_sq(d_max_min[1])
+                    )
+                )
+            d_star_sq_tickvals, d_star_sq_ticktext = d_star_sq_to_d_ticks(
+                d_star_sq_bins, nticks=5
+            )
+
+            d.update(
+                {
+                    "r_split_weighted": {
+                        "data": [
+                            {
+                                "x": d_star_sq_bins,  # d_star_sq
+                                "y": self.dataset_statistics.weighted_r_split_binned,
+                                "type": "scatter",
+                                "name": "R<sub>split</sub>(\u03C3-weighted) vs resolution",
+                            }
+                        ],
+                        "layout": {
+                            "title": "R<sub>split</sub>(\u03C3-weighted) vs resolution",
+                            "xaxis": {
+                                "title": "Resolution (Å)",
+                                "tickvals": d_star_sq_tickvals,
+                                "ticktext": d_star_sq_ticktext,
+                            },
+                            "yaxis": {
+                                "title": "R<sub>split</sub>(\u03C3-weighted)",
+                                "rangemode": "tozero",
+                            },
+                        },
+                    }
+                }
+            )
         return d
 
     def cc_one_half_plot(self, method=None):

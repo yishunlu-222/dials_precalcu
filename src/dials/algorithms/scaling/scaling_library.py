@@ -381,6 +381,7 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         self.weighted_r_split_binned = None
         self.unweighted_r_split_binned = None
         self.weighted_cc_half_binned = None
+        self.neff_binned = None
         if not (stills or weighted):
             return
         i_obs = kwargs.get("i_obs")
@@ -435,12 +436,15 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         if weighted:
             from dials.command_line.calc_rsplit import weighted_cchalf
 
-            self.weighted_cc_half = weighted_cchalf(
+            self.weighted_cc_half, _ = weighted_cchalf(
                 m1, m2, assume_index_matching=True, use_binning=False, weighted=True
             )
-            self.weighted_cc_half_binned = weighted_cchalf(
+            weighted_cc_half_binned, neff_binned = weighted_cchalf(
                 m1, m2, assume_index_matching=True, use_binning=True, weighted=True
-            ).data[1:-1]
+            )
+            if weighted_cc_half_binned is not None:
+                self.weighted_cc_half_binned = weighted_cc_half_binned.data[1:-1]
+                self.neff_binned = neff_binned[1:-1]
 
 
 def merging_stats_from_scaled_array(
