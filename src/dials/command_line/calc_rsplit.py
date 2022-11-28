@@ -41,7 +41,7 @@ def r_split(this, other, assume_index_matching=False, use_binning=False, weighte
             assert len(c.sigmas())
             joint_var = (o.sigmas() ** 2) + (c.sigmas() ** 2)
             den = flex.sum(flex.abs(o.data() + c.data()) / joint_var)
-            assert den > 0
+            # assert den > 0
             return (
                 math.sqrt(2.0)
                 * flex.sum(flex.abs(o.data() - c.data()) / joint_var)
@@ -49,7 +49,7 @@ def r_split(this, other, assume_index_matching=False, use_binning=False, weighte
             )
         else:
             den = flex.sum(flex.abs(o.data() + c.data()))
-            assert den > 0
+            # assert den > 0
             return math.sqrt(2) * flex.sum(flex.abs(o.data() - c.data())) / den
 
     assert this.binner is not None

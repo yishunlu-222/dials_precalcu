@@ -182,38 +182,36 @@ def make_dano_table(anomalous_amplitudes):
 def make_additional_stats_tables(stats_summary: MergingStatisticsData):
 
     stats = stats_summary.merging_statistics_result
-    output_ = "\n"
+    header = [
+        "Resolution range",
+    ]
+    rows = []
+    if not stats.weighted_binner:
+        return ""
+    rows = [
+        [] for _ in range(len(stats.weighted_binner.range_used()) + 1)
+    ]  # +1 for overall
+    for i, i_bin in enumerate(list(stats.weighted_binner.range_used())):
+        d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
+        rows[i].append(f"{d_max_bin:.3f} - {d_min_bin:.3f}")
+    rows[-1].append("Overall")
     if stats.unweighted_r_split:
-        header = ["Resolution range", "r-split"]
-        rows = []
-        for i_bin, rsplit in zip(
-            list(stats.weighted_binner.range_all())[1:-1],
-            stats.unweighted_r_split_binned,
-        ):
-            d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
-            rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
-        rows.append(["Overall", f"{stats.unweighted_r_split:.5f}"])
-        output_ += "\n" + tabulate(rows, header)
+        header.append("r-split")
+        for (i, rsplit) in enumerate(stats.unweighted_r_split_binned):
+            # d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
+            rows[i].append(f"{rsplit:.5f}")
+        rows[-1].append(f"{stats.unweighted_r_split:.5f}")
     if stats.weighted_r_split:
-        header = ["Resolution range", "weighted r-split"]
-        rows = []
-        for i_bin, rsplit in zip(
-            list(stats.weighted_binner.range_all())[1:-1], stats.weighted_r_split_binned
-        ):
-            d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
-            rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
-        rows.append(["Overall", f"{stats.weighted_r_split:.5f}"])
-        output_ += "\n" + tabulate(rows, header)
+        header.append("r-split(\u03C3-weighted)")
+        for i, rsplit in enumerate(stats.weighted_r_split_binned):
+            rows[i].append(f"{rsplit:.5f}")
+        rows[-1].append(f"{stats.weighted_r_split:.5f}")
     if stats.weighted_cc_half:
-        header = ["Resolution range", "weighted cc-half"]
-        rows = []
-        for i_bin, cc in zip(
-            list(stats.weighted_binner.range_all())[1:-1], stats.weighted_cc_half_binned
-        ):
-            d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
-            rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{cc:.5f}"])
-        rows.append(["Overall", f"{stats.weighted_cc_half:.5f}"])
-        output_ += "\n" + tabulate(rows, header)
+        header.append("cc-half(\u03C3-weighted)")
+        for i, cc in enumerate(stats.weighted_cc_half_binned):
+            rows[i].append(f"{cc:.5f}")
+        rows[-1].append(f"{stats.weighted_cc_half:.5f}")
+        output_ = "\n" + tabulate(rows, header)
     return output_
 
 
