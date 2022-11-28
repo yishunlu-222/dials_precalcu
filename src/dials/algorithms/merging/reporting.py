@@ -183,6 +183,17 @@ def make_additional_stats_tables(stats_summary: MergingStatisticsData):
 
     stats = stats_summary.merging_statistics_result
     output_ = "\n"
+    if stats.unweighted_r_split:
+        header = ["Resolution range", "r-split"]
+        rows = []
+        for i_bin, rsplit in zip(
+            list(stats.weighted_binner.range_all())[1:-1],
+            stats.unweighted_r_split_binned,
+        ):
+            d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
+            rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
+        rows.append(["Overall", f"{stats.unweighted_r_split:.5f}"])
+        output_ += "\n" + tabulate(rows, header)
     if stats.weighted_r_split:
         header = ["Resolution range", "weighted r-split"]
         rows = []
@@ -192,7 +203,7 @@ def make_additional_stats_tables(stats_summary: MergingStatisticsData):
             d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
             rows.append([f"{d_max_bin:.3f} - {d_min_bin:.3f}", f"{rsplit:.5f}"])
         rows.append(["Overall", f"{stats.weighted_r_split:.5f}"])
-        output_ += tabulate(rows, header)
+        output_ += "\n" + tabulate(rows, header)
     if stats.weighted_cc_half:
         header = ["Resolution range", "weighted cc-half"]
         rows = []
