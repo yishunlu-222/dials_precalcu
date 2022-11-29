@@ -372,6 +372,62 @@ def determine_best_unit_cell(experiments):
     return best_unit_cell
 
 
+from dials.command_line.calc_rsplit import weighted_cchalf
+
+
+def weighted_anom_correlation(iobs, use_binning=False, n_bins=20):
+    tmp_array = iobs.customized_copy(anomalous_flag=True).map_to_asu()
+    tmp_array = tmp_array.sort("packed_indices")
+    if not use_binning:
+        seed = 0
+        from dials_scaling_ext import weighted_split_unmerged
+
+        data = weighted_split_unmerged(
+            unmerged_indices=tmp_array.indices(),
+            unmerged_data=tmp_array.data(),
+            unmerged_sigmas=tmp_array.sigmas(),
+            seed=seed,
+        ).data()
+        I_1 = data.get_data1()
+        I_2 = data.get_data2()
+        sig_1 = data.get_sigma1()
+        sig_2 = data.get_sigma2()
+        indices = data.get_indices()
+        m1 = miller.array(
+            miller_set=miller.set(
+                tmp_array.crystal_symmetry(), indices, anomalous_flag=True
+            ),
+            data=I_1,
+            sigmas=sig_1,
+        )
+        m2 = miller.array(
+            miller_set=miller.set(
+                tmp_array.crystal_symmetry(), indices, anomalous_flag=True
+            ),
+            data=I_2,
+            sigmas=sig_2,
+        )
+        dano1 = m1.anomalous_differences()
+        dano2 = m2.anomalous_differences()
+        assert dano1.indices().all_eq(dano2.indices())
+        cc, neff = weighted_cchalf(dano1, dano2, assume_index_matching=True)
+        return cc, neff
+    tmp_array.setup_binner(n_bins=n_bins)
+    ccs = []
+    neffs = []
+    for i_bin in tmp_array.binner().range_used():
+        sel = tmp_array.binner().selection(i_bin)
+        bin_array = tmp_array.select(sel)
+        if bin_array.size() == 0:
+            ccs.append(None)
+            neffs.append(None)
+        else:
+            cc, neff = weighted_anom_correlation(bin_array)
+            ccs.append(cc)
+            neffs.append(neff)
+    return ccs, neffs
+
+
 class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
     def __init__(self, *args, stills=False, weighted=False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -389,6 +445,8 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         n_bins = kwargs.get("n_bins", 20)
         if not i_obs:
             return
+        i_obs_copy = i_obs.customized_copy()
+        i_obs_copy.setup_binner(n_bins=n_bins)
         i_obs = i_obs.map_to_asu()
         i_obs = i_obs.sort("packed_indices")
         from dials_scaling_ext import weighted_split_unmerged
@@ -415,8 +473,9 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
             data=I_2,
             sigmas=sig_2,
         )
-        m1.setup_binner(n_bins=n_bins)
-        m2.setup_binner(n_bins=n_bins)
+        assert i_obs_copy.binner() is not None
+        m1.use_binning(i_obs_copy.binner())
+        m2.use_binning(i_obs_copy.binner())
         self.weighted_binner = m1.binner()
         if stills:
             # now use i_obs to calc rsplit
@@ -446,6 +505,16 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
             if weighted_cc_half_binned is not None:
                 self.weighted_cc_half_binned = weighted_cc_half_binned.data[1:-1]
                 self.neff_binned = neff_binned[1:-1]
+            # now do weighted cc anom
+            self.weighted_cc_anom, self.neff_overall_anom = weighted_anom_correlation(
+                i_obs_copy
+            )
+            weighted_cc_half_binned, neff_binned = weighted_anom_correlation(
+                i_obs_copy, use_binning=True, n_bins=n_bins
+            )
+            if weighted_cc_half_binned is not None:
+                self.weighted_cc_anom_binned = weighted_cc_half_binned
+                self.neff_binned_anom = neff_binned
 
 
 def merging_stats_from_scaled_array(

@@ -90,6 +90,8 @@ def weighted_cchalf(
             assert len(o.sigmas())
             assert len(c.sigmas())
             n = len(o.data())
+            if n == 1:
+                return None, 1
             v_o = o.sigmas() ** 2
             v_c = c.sigmas() ** 2
             var_w = v_o + v_c
@@ -153,9 +155,12 @@ def compute_cc_significance_levels(cchalfs, neffs, cc_one_half_significance_leve
     significances = []
     critical_vals = []
     for cc, n in zip(cchalfs, neffs):
-        s, c = compute_cc_significance(
-            cc, int(math.ceil(n)), cc_one_half_significance_level
-        )
+        if cc is not None and n is not None:
+            s, c = compute_cc_significance(
+                cc, int(math.ceil(n)), cc_one_half_significance_level
+            )
+        else:
+            s, c = None, None
         significances.append(s)
         critical_vals.append(c)
     return significances, critical_vals

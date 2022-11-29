@@ -199,12 +199,12 @@ def make_additional_stats_tables(stats_summary: MergingStatisticsData):
         header.append("r-split")
         for (i, rsplit) in enumerate(stats.unweighted_r_split_binned):
             # d_max_bin, d_min_bin = stats.weighted_binner.bin_d_range(i_bin)
-            rows[i].append(f"{rsplit:.5f}")
+            rows[i].append(f"{rsplit:.5f}" if rsplit is not None else "None")
         rows[-1].append(f"{stats.unweighted_r_split:.5f}")
     if stats.weighted_r_split:
         header.append("r-split(\u03C3-weighted)")
         for i, rsplit in enumerate(stats.weighted_r_split_binned):
-            rows[i].append(f"{rsplit:.5f}")
+            rows[i].append(f"{rsplit:.5f}" if rsplit is not None else "None")
         rows[-1].append(f"{stats.weighted_r_split:.5f}")
     if stats.weighted_cc_half:
         header.append("cc-half(\u03C3-weighted)")
@@ -215,13 +215,34 @@ def make_additional_stats_tables(stats_summary: MergingStatisticsData):
             stats.neff_binned,
         )
         for i, (cc, s) in enumerate(zip(stats.weighted_cc_half_binned, significant)):
-            rows[i].append(f"{cc:.5f}" + "*" if s else f"{cc:.5f}")
+            rows[i].append(
+                f"{cc:.5f}" + "*" if s else f"{cc:.5f}" if cc is not None else "None"
+            )
         sig, _ = compute_cc_significance_levels(
             [stats.weighted_cc_half], [stats.neff_overall]
         )
         val = f"{stats.weighted_cc_half:.5f}"
         rows[-1].append(val + "*" if sig[0] else val)
-        output_ = "\n" + tabulate(rows, header)
+    if stats.weighted_cc_anom:
+        header.append("cc-anom(\u03C3-weighted)")
+        from dials.command_line.calc_rsplit import compute_cc_significance_levels
+
+        significant, _ = compute_cc_significance_levels(
+            stats.weighted_cc_anom_binned,
+            stats.neff_binned_anom,
+        )
+        print(len(stats.weighted_cc_anom_binned))
+        for i, (cc, s) in enumerate(zip(stats.weighted_cc_anom_binned, significant)):
+            rows[i].append(
+                f"{cc:.5f}" + "*" if s else f"{cc:.5f}" if cc is not None else "None"
+            )
+        sig, _ = compute_cc_significance_levels(
+            [stats.weighted_cc_anom], [stats.neff_overall_anom]
+        )
+        val = f"{stats.weighted_cc_anom:.5f}"
+        rows[-1].append(val + "*" if sig[0] else val)
+
+    output_ = "\n" + tabulate(rows, header)
     return output_
 
 

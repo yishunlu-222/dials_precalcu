@@ -637,9 +637,13 @@ class ResolutionPlotsAndStats:
             d_star_sq_bins = []
             from dials.command_line.calc_rsplit import compute_cc_significance_levels
 
-            s, critical_vals = compute_cc_significance_levels(
+            _, critical_vals = compute_cc_significance_levels(
                 self.dataset_statistics.weighted_cc_half_binned,
                 self.dataset_statistics.neff_binned,
+            )
+            _, critical_anom_vals = compute_cc_significance_levels(
+                self.dataset_statistics.weighted_cc_anom_binned,
+                self.dataset_statistics.neff_binned_anom,
             )
             for bin in self.dataset_statistics.weighted_binner.range_used():
                 d_max_min = self.dataset_statistics.weighted_binner.bin_d_range(bin)
@@ -659,6 +663,8 @@ class ResolutionPlotsAndStats:
                         cc_half_fit=None,
                         d_min=None,
                         cc_half_critical_values=critical_vals,
+                        cc_anom=self.dataset_statistics.weighted_cc_anom_binned,
+                        cc_anom_critical_values=critical_anom_vals,
                     )
                 }
             )
@@ -1338,6 +1344,9 @@ def cc_half_plot(
     d_min=None,
 ):
     d_star_sq_tickvals, d_star_sq_ticktext = d_star_sq_to_d_ticks(d_star_sq, nticks=5)
+    min_y = min([cc if cc is not None else 0 for cc in cc_half] + [0])
+    if cc_anom:
+        min_y = min([min_y, min([cc if cc is not None else 0 for cc in cc_anom])])
     return {
         "data": [
             {
@@ -1416,7 +1425,7 @@ def cc_half_plot(
             },
             "yaxis": {
                 "title": "CC<sub>½</sub>",
-                "range": [min(cc_half + cc_anom if cc_anom else [] + [0]), 1],
+                "range": [min_y, 1],
             },
         },
         "help": """\
