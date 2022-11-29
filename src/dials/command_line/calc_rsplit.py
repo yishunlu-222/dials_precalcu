@@ -103,9 +103,11 @@ def weighted_cchalf(
             sx = flex.sum((o.data() - xbar) ** 2 * norm_jw)
             sy = flex.sum((c.data() - ybar) ** 2 * norm_jw)
             # what is neff? neff = 1/V2
-            V2 = flex.sum(norm_jw**2)
-
-            return (sxy / ((sx * sy) ** 0.5), 1.0 / V2)
+            # V2 = flex.sum(norm_jw**2)
+            # use entropy based approach
+            neff = math.exp(-1.0 * flex.sum(norm_jw * flex.log(norm_jw)))
+            # print(n, neff, 1.0/V2)
+            return (sxy / ((sx * sy) ** 0.5), neff)
         else:
             n = len(o.data())
             xbar = flex.sum(o.data()) / n

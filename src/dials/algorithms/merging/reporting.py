@@ -208,9 +208,19 @@ def make_additional_stats_tables(stats_summary: MergingStatisticsData):
         rows[-1].append(f"{stats.weighted_r_split:.5f}")
     if stats.weighted_cc_half:
         header.append("cc-half(\u03C3-weighted)")
-        for i, cc in enumerate(stats.weighted_cc_half_binned):
-            rows[i].append(f"{cc:.5f}")
-        rows[-1].append(f"{stats.weighted_cc_half:.5f}")
+        from dials.command_line.calc_rsplit import compute_cc_significance_levels
+
+        significant, _ = compute_cc_significance_levels(
+            stats.weighted_cc_half_binned,
+            stats.neff_binned,
+        )
+        for i, (cc, s) in enumerate(zip(stats.weighted_cc_half_binned, significant)):
+            rows[i].append(f"{cc:.5f}" + "*" if s else f"{cc:.5f}")
+        sig, _ = compute_cc_significance_levels(
+            [stats.weighted_cc_half], [stats.neff_overall]
+        )
+        val = f"{stats.weighted_cc_half:.5f}"
+        rows[-1].append(val + "*" if sig[0] else val)
         output_ = "\n" + tabulate(rows, header)
     return output_
 
