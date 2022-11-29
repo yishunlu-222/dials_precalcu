@@ -649,38 +649,39 @@ protected:
           i + std::min(n - i - 1, std::size_t(gen.random_double() * (n - i)));
         i_obs[0] += temp[ind] * temp_w[ind];
         sum_w[0] += temp_w[ind];
-        sum_wx2[0] += temp[ind] * temp[ind] * temp_w[ind];
-        v2[0] += (temp_w[ind] * temp_w[ind]);
+        // sum_wx2[0] += temp[ind] * temp[ind] * temp_w[ind];
+        // v2[0] += (temp_w[ind] * temp_w[ind]);
         temp[ind] = temp[i];
         temp_w[ind] = temp_w[i];
       }
       for (std::size_t i = nsum; i < n; i++) {
         i_obs[1] += temp[i] * temp_w[i];
         sum_w[1] += temp_w[i];
-        sum_wx2[1] += temp[i] * temp[i] * temp_w[i];
-        v2[1] += (temp_w[i] * temp_w[i]);
+        // sum_wx2[1] += temp[i] * temp[i] * temp_w[i];
+        // v2[1] += (temp_w[i] * temp_w[i]);
       }
       float mu_0 = i_obs[0] / sum_w[0];
       float mu_1 = i_obs[1] / sum_w[1];
       data_1.push_back(mu_0);
       data_2.push_back(mu_1);
-      if (n_obs[0] > 1) {
-        float num = sum_wx2[0] - (2.0 * i_obs[0] * mu_0) + (sum_w[0] * mu_0 * mu_0);
-        float denom = sum_w[0] - (v2[0] / sum_w[0]);
-        sigma_1.push_back(std::sqrt(num / denom));
-        // sigma_1.push_back(std::sqrt(
-        //   ((sum_wx2[0] / sum_w[0]) - ((i_obs[0] / sum_w[0]) * (i_obs[0] / sum_w[0])))
-        //   * (1.0 / (n_obs[0] - 1))));
-      } else {
-        sigma_1.push_back(std::sqrt(1.0 / sum_w[0]));
-      }
-      if (n_obs[1] > 1) {
-        float num2 = sum_wx2[1] - (2.0 * i_obs[1] * mu_1) + (sum_w[1] * mu_1 * mu_1);
-        float denom2 = sum_w[1] - (v2[1] / sum_w[1]);
-        sigma_2.push_back(std::sqrt(num2 / denom2));
-      } else {
-        sigma_2.push_back(std::sqrt(1.0 / sum_w[1]));
-      }
+      // if (n_obs[0] > 1) {
+      //   float num = sum_wx2[0] - (2.0 * i_obs[0] * mu_0) + (sum_w[0] * mu_0 * mu_0);
+      //   float denom = sum_w[0] - (v2[0] / sum_w[0]);
+      //   sigma_1.push_back(std::sqrt(num / denom));
+      //   // sigma_1.push_back(std::sqrt(
+      //   //   ((sum_wx2[0] / sum_w[0]) - ((i_obs[0] / sum_w[0]) * (i_obs[0] /
+      //   sum_w[0])))
+      //   //   * (1.0 / (n_obs[0] - 1))));
+      // } else {
+      sigma_1.push_back(std::sqrt(1.0 / sum_w[0]));
+      //}
+      // if (n_obs[1] > 1) {
+      //  float num2 = sum_wx2[1] - (2.0 * i_obs[1] * mu_1) + (sum_w[1] * mu_1 * mu_1);
+      //  float denom2 = sum_w[1] - (v2[1] / sum_w[1]);
+      //  sigma_2.push_back(std::sqrt(num2 / denom2));
+      //} else {
+      sigma_2.push_back(std::sqrt(1.0 / sum_w[1]));
+      //}
       indices.push_back(current_index);
     }
   }
