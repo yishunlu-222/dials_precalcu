@@ -91,7 +91,8 @@ class ScalingSummaryContextManager:
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
-        print_scaling_summary(self.script)
+        if self.script.experiments:
+            print_scaling_summary(self.script)
 
 
 def print_scaling_summary(script):
