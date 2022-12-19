@@ -198,6 +198,16 @@ def make_additional_stats_table(stats_summary: MergingStatisticsData):
         for (i, rsplit) in enumerate(stats.r_split_binned):
             rows[i].append(f"{rsplit:.5f}" if rsplit is not None else "None")
         rows[-1].append(f"{stats.r_split:.5f}")
+    if stats.wr_split:
+        header.append("r-split(\u03C3-weighted)")
+        for (i, wrsplit) in enumerate(stats.wr_split_binned):
+            rows[i].append(f"{wrsplit:.5f}" if wrsplit is not None else "None")
+        rows[-1].append(f"{stats.wr_split:.5f}")
+    if stats.wcc_half:
+        header.append("cc-half(\u03C3-weighted)")
+        for (i, cc) in enumerate(stats.wcc_half_binned):
+            rows[i].append(f"{cc:.5f}" if cc is not None else "None")
+        rows[-1].append(f"{stats.wcc_half:.5f}")
     output_ = "\n" + tabulate(rows, header)
     return output_
 

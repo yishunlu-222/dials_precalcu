@@ -14,11 +14,11 @@ from __future__ import annotations
 import logging
 import math
 from copy import deepcopy
+from typing import List, Optional, Tuple
 from unittest.mock import Mock
 
 import numpy as np
 import pkg_resources
-from cctbx_miller_ext import split_unmerged
 
 import iotbx.merging_statistics
 from cctbx import crystal, miller, uctbx
@@ -36,6 +36,7 @@ from dials.array_family import flex
 from dials.util import Sorry
 from dials.util.options import ArgumentParser
 from dials.util.reference import intensities_from_reference_file
+from dials_scaling_ext import weighted_split_unmerged
 
 logger = logging.getLogger("dials")
 
@@ -382,6 +383,12 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         super().__init__(*args, **kwargs)
         self.r_split = None
         self.r_split_binned = None
+        self.wcc_half = None
+        self.wcc_half_binned = None
+        self.wr_split = None
+        self.wr_split_binned = None
+        self.neff_overall = None
+        self.neff_binned = None
         if not additional_stats:
             return
         i_obs = kwargs.get("i_obs")
@@ -394,30 +401,52 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         i_obs = i_obs.sort("packed_indices")
 
         seed = 0
-        split_datasets = split_unmerged(
+        data = weighted_split_unmerged(
             unmerged_indices=i_obs.indices(),
             unmerged_data=i_obs.data(),
             unmerged_sigmas=i_obs.sigmas(),
             seed=seed,
-        )
-        indices = split_datasets.indices
+        ).data()
+        I_1 = data.get_data1()
+        I_2 = data.get_data2()
+        sig_1 = data.get_sigma1()
+        sig_2 = data.get_sigma2()
+        indices = data.get_indices()
         m1 = miller.array(
             miller_set=miller.set(i_obs.crystal_symmetry(), indices),
-            data=split_datasets.data_1,
+            data=I_1,
+            sigmas=sig_1,
         )
         m2 = miller.array(
             miller_set=miller.set(i_obs.crystal_symmetry(), indices),
-            data=split_datasets.data_2,
+            data=I_2,
+            sigmas=sig_2,
         )
         assert i_obs_copy.binner() is not None
         self.binner = i_obs_copy.binner()
         m1.use_binning(self.binner)
         m2.use_binning(self.binner)
+
         self.r_split = self.calc_rsplit(
             m1, m2, assume_index_matching=True, use_binning=False
         )
         self.r_split_binned = self.calc_rsplit(
             m1, m2, assume_index_matching=True, use_binning=True
+        )
+        # Now try weighted
+        self.wcc_half, self.neff_overall = self.calc_weighted_cchalf(
+            m1, m2, assume_index_matching=True, use_binning=False
+        )
+        logger.info(self.wcc_half)
+        self.wcc_half_binned, self.neff_binned = self.calc_weighted_cchalf(
+            m1, m2, assume_index_matching=True, use_binning=True
+        )
+        logger.info(self.wcc_half_binned)
+        self.wr_split = self.calc_rsplit(
+            m1, m2, assume_index_matching=True, use_binning=False, weighted=True
+        )
+        self.wr_split_binned = self.calc_rsplit(
+            m1, m2, assume_index_matching=True, use_binning=True, weighted=True
         )
 
     def as_dict(self):
@@ -429,7 +458,9 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         return d
 
     @classmethod
-    def calc_rsplit(cls, this, other, assume_index_matching=False, use_binning=False):
+    def calc_rsplit(
+        cls, this, other, assume_index_matching=False, use_binning=False, weighted=False
+    ):
         # based on White, T. A. et al. J. Appl. Cryst. 45, 335-341 (2012).
         # adapted from cctbx_project/xfel/cxi_cc.py
         if not use_binning:
@@ -441,11 +472,25 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
                 (o, c) = (this, other)
             else:
                 (o, c) = this.common_sets(other=other, assert_no_singles=True)
+            if weighted:
+                assert len(o.sigmas())
+                assert len(c.sigmas())
+                joint_var = (o.sigmas() ** 2) + (c.sigmas() ** 2)
+                assert joint_var > 0
+                den = flex.sum((o.data() + c.data()) / joint_var)
+                if den == 0:
+                    return -1
+                return (
+                    math.sqrt(2.0)
+                    * flex.sum(flex.abs(o.data() - c.data()) / joint_var)
+                    / den
+                )
+            else:
 
-            den = flex.sum(o.data() + c.data())
-            if den == 0:  # avoid zero division error
-                return None
-            return math.sqrt(2) * flex.sum(flex.abs(o.data() - c.data())) / den
+                den = flex.sum(o.data() + c.data())
+                if den == 0:  # avoid zero division error
+                    return -1
+                return math.sqrt(2) * flex.sum(flex.abs(o.data() - c.data())) / den
 
         assert this.binner is not None
         results = []
@@ -457,9 +502,118 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
                     other.select(sel),
                     assume_index_matching=assume_index_matching,
                     use_binning=False,
+                    weighted=weighted,
                 )
             )
         return results
+
+    @classmethod
+    def calc_weighted_cchalf(
+        cls, this, other, assume_index_matching=False, use_binning=False, weighted=True
+    ):
+
+        if not use_binning:
+            assert other.indices().size() == this.indices().size()
+            if this.data().size() == 0:
+                return None, None
+
+            if assume_index_matching:
+                (o, c) = (this, other)
+            else:
+                (o, c) = this.common_sets(other=other, assert_no_singles=True)
+
+            # The case where the denominator is less or equal to zero is
+            # pathological and should never arise in practice.
+            if weighted:
+                assert len(o.sigmas())
+                assert len(c.sigmas())
+                n = len(o.data())
+                if n == 1:
+                    return None, 1
+                v_o = o.sigmas() ** 2
+                v_c = c.sigmas() ** 2
+                var_w = v_o + v_c
+                joint_w = 1.0 / var_w
+                sumjw = flex.sum(joint_w)
+                norm_jw = joint_w / sumjw
+                # norm_wo = (1.0 / v_o) / flex.sum(1.0 / v_o)
+                # norm_wc = (1.0 / v_c) / flex.sum(1.0 / v_c)
+                xbar = flex.sum(o.data() * norm_jw)
+                ybar = flex.sum(c.data() * norm_jw)
+                sxy = flex.sum((o.data() - xbar) * (c.data() - ybar) * norm_jw)
+
+                sx = flex.sum((o.data() - xbar) ** 2 * norm_jw)
+                sy = flex.sum((c.data() - ybar) ** 2 * norm_jw)
+                # use entropy based approach
+                neff = math.exp(-1.0 * flex.sum(norm_jw * flex.log(norm_jw)))
+                return (sxy / ((sx * sy) ** 0.5), neff)
+            else:
+                n = len(o.data())
+                xbar = flex.sum(o.data()) / n
+                ybar = flex.sum(c.data()) / n
+                sxy = flex.sum((o.data() - xbar) * (c.data() - ybar))
+                sx = flex.sum((o.data() - xbar) ** 2)
+                sy = flex.sum((c.data() - ybar) ** 2)
+
+                return (sxy / ((sx * sy) ** 0.5), n)
+        assert this.binner is not None
+        results = []
+        n_eff = []
+        for i_bin in this.binner().range_used():
+            sel = this.binner().selection(i_bin)
+            cchalf, neff = cls.calc_weighted_cchalf(
+                this.select(sel),
+                other.select(sel),
+                assume_index_matching=assume_index_matching,
+                use_binning=False,
+                weighted=weighted,
+            )
+            results.append(cchalf)
+            n_eff.append(neff)
+        return results, n_eff
+
+
+def weighted_cc_half_from_scaled_array(
+    scaled_miller_array, n_bins: Optional[int] = None, seed: int = 0
+) -> Tuple[List[float], List[float]]:
+    results: List[float] = []
+    neffs: List[float] = []
+
+    i_obs = scaled_miller_array
+    if n_bins:
+        i_obs_copy = i_obs.customized_copy()
+        i_obs_copy.setup_binner(n_bins=n_bins)
+    i_obs = i_obs.map_to_asu()
+    i_obs = i_obs.sort("packed_indices")
+    data = weighted_split_unmerged(
+        unmerged_indices=i_obs.indices(),
+        unmerged_data=i_obs.data(),
+        unmerged_sigmas=i_obs.sigmas(),
+        seed=seed,
+    ).data()
+    m1 = miller.array(
+        miller_set=miller.set(i_obs.crystal_symmetry(), data.get_indices()),
+        data=data.get_data1(),
+        sigmas=data.get_sigma1(),
+    )
+    m2 = miller.array(
+        miller_set=miller.set(i_obs.crystal_symmetry(), data.get_indices()),
+        data=data.get_data2(),
+        sigmas=data.get_sigma2(),
+    )
+    if n_bins:
+        assert i_obs_copy.binner() is not None
+        m1.use_binning(i_obs_copy.binner())
+        m2.use_binning(i_obs_copy.binner())
+        results, neffs = ExtendedDatasetStatistics.calc_weighted_cchalf(
+            m1, m2, assume_index_matching=True, use_binning=True, weighted=True
+        )
+    else:
+        result, neff = ExtendedDatasetStatistics.calc_weighted_cchalf(
+            m1, m2, assume_index_matching=True, use_binning=False, weighted=True
+        )
+        results, neffs = ([result], [neff])
+    return results, neffs
 
 
 def merging_stats_from_scaled_array(

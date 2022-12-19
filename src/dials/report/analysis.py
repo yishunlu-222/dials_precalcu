@@ -196,6 +196,8 @@ formats = {
     "Rpim(I+/-)": "%7.3f",
     "Rsplit": "%7.3f",
     "CC half": "%7.3f",
+    "Rsplit(\u03C3-weighted)": "%7.3f",
+    "CC half(\u03C3-weighted)": "%7.3f",
     "Wilson B factor": "%7.3f",
     "Partial bias": "%7.3f",
     "Anomalous completeness": "%7.1f",
@@ -294,6 +296,19 @@ def table_1_stats(
                     "overall": "r_split",
                     "binned": "r_split_binned",
                 }
+            }
+        )
+    if merging_statistics.wr_split:
+        extra_key_to_var.update(
+            {
+                "Rsplit(\u03C3-weighted)": {
+                    "overall": "wr_split",
+                    "binned": "wr_split_binned",
+                },
+                "CC half(\u03C3-weighted)": {
+                    "overall": "wcc_half",
+                    "binned": "wcc_half_binned",
+                },
             }
         )
 

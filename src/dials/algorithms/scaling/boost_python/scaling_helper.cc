@@ -1,6 +1,8 @@
 #include <boost/python.hpp>
 #include <boost/python/def.hpp>
 #include <dials/algorithms/scaling/scaling_helper.h>
+#include <cctbx/miller.h>
+#include <dials/array_family/scitbx_shared_and_versa.h>
 
 namespace dials_scaling { namespace boost_python {
 
@@ -99,6 +101,27 @@ namespace dials_scaling { namespace boost_python {
       .def("multi_value_weight", &GaussianSmootherFirstFixed::multi_value_weight)
       .def("multi_value_weight_first_fixed",
            &GaussianSmootherFirstFixed::multi_value_weight_first_fixed);
+  }
+
+  void export_weighted_split_unmerged() {
+    class_<weighted_split_unmerged>("weighted_split_unmerged", no_init)
+      .def(init<scitbx::af::const_ref<cctbx::miller::index<> > const&,
+                scitbx::af::const_ref<double> const&,
+                scitbx::af::const_ref<double> const&,
+                bool,
+                unsigned>((arg("unmerged_indices"),
+                           arg("unmerged_data"),
+                           arg("unmerged_sigmas"),
+                           arg("weighted") = true,
+                           arg("seed") = 0)))
+      .def("data", &weighted_split_unmerged::data);
+
+    class_<ResultsStruct>("ResultsStruct", no_init)
+      .def("get_data1", &ResultsStruct::get_data1)
+      .def("get_data2", &ResultsStruct::get_data2)
+      .def("get_sigma1", &ResultsStruct::get_sigma1)
+      .def("get_sigma2", &ResultsStruct::get_sigma2)
+      .def("get_indices", &ResultsStruct::get_indices);
   }
 
 }}  // namespace dials_scaling::boost_python
