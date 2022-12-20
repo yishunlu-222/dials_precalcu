@@ -375,6 +375,36 @@ def determine_best_unit_cell(experiments):
     return best_unit_cell
 
 
+def compute_cc_significance(r, n, p):
+    # https://en.wikipedia.org/wiki/Pearson_product-moment_correlation_coefficient#Testing_using_Student.27s_t-distribution
+    if r == -1 or n <= 2:
+        significance = False
+        critical_value = 0
+    else:
+        from scitbx.math import distributions
+
+        dist = distributions.students_t_distribution(n - 2)
+        t = dist.quantile(1 - p)
+        critical_value = t / math.sqrt(n - 2 + t**2)
+        significance = r > critical_value
+    return significance, critical_value
+
+
+def compute_cc_significance_levels(cchalfs, neffs, cc_one_half_significance_level=0.01):
+    significances = []
+    critical_vals = []
+    for cc, n in zip(cchalfs, neffs):
+        if cc is not None and n is not None:
+            s, c = compute_cc_significance(
+                cc, int(math.ceil(n)), cc_one_half_significance_level
+            )
+        else:
+            s, c = False, 0.0
+        significances.append(s)
+        critical_vals.append(c)
+    return significances, critical_vals
+
+
 class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
 
     """A class to extend iotbx merging statistics."""
@@ -389,6 +419,8 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         self.wr_split_binned = None
         self.neff_overall = None
         self.neff_binned = None
+        self.wcc_half_significances = []
+        self.wcc_half_critical_vals = []
         if not additional_stats:
             return
         i_obs = kwargs.get("i_obs")
@@ -437,11 +469,14 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         self.wcc_half, self.neff_overall = self.calc_weighted_cchalf(
             m1, m2, assume_index_matching=True, use_binning=False
         )
-        logger.info(self.wcc_half)
         self.wcc_half_binned, self.neff_binned = self.calc_weighted_cchalf(
             m1, m2, assume_index_matching=True, use_binning=True
         )
-        logger.info(self.wcc_half_binned)
+        if self.wcc_half_binned:
+            (
+                self.wcc_half_significances,
+                self.wcc_half_critical_vals,
+            ) = compute_cc_significance_levels(self.wcc_half_binned, self.neff_binned)
         self.wr_split = self.calc_rsplit(
             m1, m2, assume_index_matching=True, use_binning=False, weighted=True
         )
@@ -515,7 +550,7 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         if not use_binning:
             assert other.indices().size() == this.indices().size()
             if this.data().size() == 0:
-                return None, None
+                return 0.0, 0
 
             if assume_index_matching:
                 (o, c) = (this, other)
@@ -529,7 +564,7 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
                 assert len(c.sigmas())
                 n = len(o.data())
                 if n == 1:
-                    return None, 1
+                    return 0.0, 1
                 v_o = o.sigmas() ** 2
                 v_c = c.sigmas() ** 2
                 var_w = v_o + v_c

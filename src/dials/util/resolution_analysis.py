@@ -135,11 +135,17 @@ def resolution_fit_from_merging_stats(merging_stats, metric, model, limit, sel=N
 
     Returns: The estimated resolution limit in units of Å^-1
     """
-
-    y_obs = flex.double(getattr(b, metric) for b in merging_stats.bins).reversed()
-    d_star_sq = flex.double(
-        uctbx.d_as_d_star_sq(b.d_min) for b in merging_stats.bins
-    ).reversed()
+    if metric == "sigma_weighted":
+        y_obs = flex.double(merging_stats.wcc_half_binned).reversed()
+        d_star_sq = flex.double(
+            uctbx.d_as_d_star_sq(merging_stats.binner.bin_d_range(b)[1])
+            for b in merging_stats.binner.range_used()
+        ).reversed()
+    else:
+        y_obs = flex.double(getattr(b, metric) for b in merging_stats.bins).reversed()
+        d_star_sq = flex.double(
+            uctbx.d_as_d_star_sq(b.d_min) for b in merging_stats.bins
+        ).reversed()
     return resolution_fit(d_star_sq, y_obs, model, limit, sel=sel)
 
 
@@ -202,7 +208,9 @@ def resolution_fit(d_star_sq, y_obs, model, limit, sel=None):
 
 def _get_cc_half_significance(merging_stats, cc_half_method):
     """Get the CC½ significance values from the input merging_stats object"""
-    if (
+    if cc_half_method == "sigma_weighted":
+        return flex.bool(merging_stats.wcc_half_significances).reversed()
+    elif (
         cc_half_method == "sigma_tau"
         and merging_stats.overall.cc_one_half_sigma_tau_significance is not None
     ):
@@ -217,7 +225,9 @@ def _get_cc_half_significance(merging_stats, cc_half_method):
 
 def _get_cc_half_critical_values(merging_stats, cc_half_method):
     """Get the CC½ critical values from the input merging_stats object"""
-    if (
+    if cc_half_method == "sigma_weighted":
+        return flex.double(merging_stats.wcc_half_critical_vals).reversed()
+    elif (
         cc_half_method == "sigma_tau"
         and merging_stats.overall.cc_one_half_sigma_tau_critical_value is not None
     ):
@@ -248,6 +258,7 @@ def resolution_cc_half(
             merging statistics object
         cc_half_method (str): The method for calculating CC½. Either "half_dataset" or
             "sigma_tau" (See Assmann et al., J. Appl. Cryst. (2016). 49, 1021–1028).
+            or "sigma_weighted"
         model: The function to fit to the selected metric. Must be callable, taking as
             input x (d_star_sq) and y (the metric to be fitted) values, returning the
             fitted y(x) values. Default is `tanh_fit`.
@@ -256,7 +267,12 @@ def resolution_cc_half(
     Returns: The estimated resolution limit in units of Å^-1
     """
     sel = _get_cc_half_significance(merging_stats, cc_half_method)
-    metric = "cc_one_half_sigma_tau" if cc_half_method == "sigma_tau" else "cc_one_half"
+    if cc_half_method == "sigma_tau":
+        metric = "cc_one_half_sigma_tau"
+    elif cc_half_method == "sigma_weighted":
+        metric = "sigma_weighted"
+    else:
+        metric = "cc_one_half"
     result = resolution_fit_from_merging_stats(
         merging_stats, metric, model, limit, sel=sel
     )

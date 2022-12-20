@@ -154,7 +154,9 @@ were considered for use when refining the scaling model.
         logger.info(make_merging_statistics_summary(stats))
         try:
             if script.params.cut_data.d_min is None:
-                d_min = resolution_cc_half(stats, limit=0.3).d_min
+                d_min = resolution_cc_half(
+                    stats, limit=0.3, cc_half_method="sigma_weighted"
+                ).d_min
             else:
                 d_min = script.params.cut_data.d_min
         except RuntimeError as e:
