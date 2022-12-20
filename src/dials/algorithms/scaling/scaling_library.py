@@ -421,10 +421,19 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         self.neff_binned = None
         self.wcc_half_significances = []
         self.wcc_half_critical_vals = []
+        self.wcc_half_significance_overall = False
+        self.wcc_anom_overall = None
+        self.neff_anom_overall = None
+        self.wcc_anom_binned = None
+        self.neff_anom_binned = None
+        self.wcc_anom_significances = []
+        self.wcc_anom_critical_vals = []
+        self.wcc_anom_significance_overall = None
         if not additional_stats:
             return
         i_obs = kwargs.get("i_obs")
         n_bins = kwargs.get("n_bins", 20)
+        anomalous = kwargs.get("anomalous")
         if not i_obs:
             return
         i_obs_copy = i_obs.customized_copy()
@@ -469,6 +478,9 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         self.wcc_half, self.neff_overall = self.calc_weighted_cchalf(
             m1, m2, assume_index_matching=True, use_binning=False
         )
+        self.wcc_half_significance_overall, _ = compute_cc_significance(
+            self.wcc_half, int(math.ceil(self.neff_overall)), 0.01
+        )
         self.wcc_half_binned, self.neff_binned = self.calc_weighted_cchalf(
             m1, m2, assume_index_matching=True, use_binning=True
         )
@@ -483,6 +495,76 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         self.wr_split_binned = self.calc_rsplit(
             m1, m2, assume_index_matching=True, use_binning=True, weighted=True
         )
+        if anomalous:
+            # now calculate cc_anom
+            (
+                self.wcc_anom_overall,
+                self.neff_anom_overall,
+            ) = self.weighted_cc_anom_from_scaled_array(i_obs, seed=seed)
+            self.wcc_anom_significance_overall, _ = compute_cc_significance(
+                self.wcc_anom_overall, int(math.ceil(self.neff_anom_overall)), 0.01
+            )
+            (
+                self.wcc_anom_binned,
+                self.neff_anom_binned,
+            ) = self.weighted_cc_anom_from_scaled_array(i_obs, n_bins=n_bins, seed=seed)
+            (
+                self.wcc_anom_significances,
+                self.wcc_anom_critical_vals,
+            ) = compute_cc_significance_levels(
+                self.wcc_anom_binned, self.neff_anom_binned
+            )
+
+    @classmethod
+    def weighted_cc_anom_from_scaled_array(cls, i_obs, n_bins=None, seed=0):
+        tmp_array = i_obs.customized_copy(anomalous_flag=True).map_to_asu()
+        tmp_array = tmp_array.sort("packed_indices")
+        if not n_bins:
+            data = weighted_split_unmerged(
+                unmerged_indices=tmp_array.indices(),
+                unmerged_data=tmp_array.data(),
+                unmerged_sigmas=tmp_array.sigmas(),
+                seed=seed,
+            ).data()
+            indices = data.get_indices()
+            m1 = miller.array(
+                miller_set=miller.set(
+                    tmp_array.crystal_symmetry(), indices, anomalous_flag=True
+                ),
+                data=data.get_data1(),
+                sigmas=data.get_sigma1(),
+            )
+            m2 = miller.array(
+                miller_set=miller.set(
+                    tmp_array.crystal_symmetry(), indices, anomalous_flag=True
+                ),
+                data=data.get_data2(),
+                sigmas=data.get_sigma2(),
+            )
+            dano1 = m1.anomalous_differences()
+            dano2 = m2.anomalous_differences()
+            assert dano1.indices().all_eq(dano2.indices())
+            return cls.calc_weighted_cchalf(
+                dano1,
+                dano2,
+                assume_index_matching=True,
+                use_binning=False,
+                weighted=True,
+            )
+        tmp_array.setup_binner(n_bins=n_bins)
+        ccs = []
+        neffs = []
+        for i_bin in tmp_array.binner().range_used():
+            sel = tmp_array.binner().selection(i_bin)
+            bin_array = tmp_array.select(sel)
+            if bin_array.size() == 0:
+                ccs.append(0.0)
+                neffs.append(0)
+            else:
+                cc, neff = weighted_cc_anom_from_scaled_array(bin_array)
+                ccs.append(cc)
+                neffs.append(neff)
+        return ccs, neffs
 
     def as_dict(self):
         d = super().as_dict()
@@ -501,7 +583,7 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
         if not use_binning:
             assert other.indices().size() == this.indices().size()
             if this.data().size() == 0:
-                return None
+                return 0.0
 
             if assume_index_matching:
                 (o, c) = (this, other)
@@ -606,6 +688,14 @@ class ExtendedDatasetStatistics(iotbx.merging_statistics.dataset_statistics):
             results.append(cchalf)
             n_eff.append(neff)
         return results, n_eff
+
+
+def weighted_cc_anom_from_scaled_array(
+    scaled_miller_array, n_bins: Optional[int] = None, seed: int = 0
+) -> Tuple[List[float], List[float]]:
+    return ExtendedDatasetStatistics.weighted_cc_anom_from_scaled_array(
+        scaled_miller_array, n_bins=n_bins, seed=seed
+    )
 
 
 def weighted_cc_half_from_scaled_array(

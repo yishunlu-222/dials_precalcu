@@ -684,6 +684,8 @@ class ResolutionPlotsAndStats:
                         d_star_sq=d_star_sq_bins,
                         cc_half=self.dataset_statistics.wcc_half_binned,
                         cc_half_fit=None,
+                        cc_anom=self.anomalous_dataset_statistics.wcc_anom_binned,
+                        cc_anom_critical_values=self.anomalous_dataset_statistics.wcc_anom_critical_vals,
                         d_min=None,
                         cc_half_critical_values=critical_vals,
                     )

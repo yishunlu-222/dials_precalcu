@@ -182,6 +182,7 @@ def make_dano_table(anomalous_amplitudes):
 def make_additional_stats_table(stats_summary: MergingStatisticsData):
 
     stats = stats_summary.merging_statistics_result
+    anom_stats = stats_summary.anom_merging_statistics_result
     header = [
         "Resolution range",
     ]
@@ -199,15 +200,33 @@ def make_additional_stats_table(stats_summary: MergingStatisticsData):
             rows[i].append(f"{rsplit:.5f}" if rsplit is not None else "None")
         rows[-1].append(f"{stats.r_split:.5f}")
     if stats.wr_split:
-        header.append("r-split(\u03C3-weighted)")
+        header.append("r-split\n(\u03C3-weighted)")
         for (i, wrsplit) in enumerate(stats.wr_split_binned):
             rows[i].append(f"{wrsplit:.5f}" if wrsplit is not None else "None")
         rows[-1].append(f"{stats.wr_split:.5f}")
     if stats.wcc_half:
-        header.append("cc-half(\u03C3-weighted)")
-        for (i, cc) in enumerate(stats.wcc_half_binned):
-            rows[i].append(f"{cc:.5f}" if cc is not None else "None")
-        rows[-1].append(f"{stats.wcc_half:.5f}")
+        header.append("cc-half\n(\u03C3-weighted)")
+        for i, (cc, s) in enumerate(
+            zip(stats.wcc_half_binned, stats.wcc_half_significances)
+        ):
+            rows[i].append(f"{cc:.5f}" + "*" if s else f"{cc:.5f}")
+        rows[-1].append(
+            f"{stats.wcc_half:.5f}" + "*"
+            if stats.wcc_half_significance_overall
+            else f"{stats.wcc_half:.5f}"
+        )
+    if anom_stats.wcc_anom_overall:
+        header.append("cc-anom\n(\u03C3-weighted)")
+        for i, (cc, s) in enumerate(
+            zip(anom_stats.wcc_anom_binned, anom_stats.wcc_anom_significances)
+        ):
+            rows[i].append(f"{cc:.5f}" + "*" if s else f"{cc:.5f}")
+        rows[-1].append(
+            f"{anom_stats.wcc_anom_overall:.5f}" + "*"
+            if anom_stats.wcc_anom_significance_overall
+            else f"{anom_stats.wcc_anom_overall:.5f}"
+        )
+
     output_ = "\n" + tabulate(rows, header)
     return output_
 
